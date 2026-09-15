@@ -1,0 +1,2270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>광역버스 실시간 위치 · 3D</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --panel: rgba(12, 16, 22, 0.88);
+      --text: #f2f4f7;
+      --muted: #9aa3af;
+      --line: rgba(255, 255, 255, 0.08);
+      --accent: #ff5a3d;
+      --bus: #ffe566;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      font-family: "IBM Plex Sans KR", sans-serif;
+      color: var(--text);
+      background: #0b0f14;
+    }
+    #map { position: absolute; inset: 0; }
+
+    #panel {
+      position: absolute; top: 16px; left: 16px; z-index: 10;
+      width: min(300px, calc(100vw - 32px));
+      max-width: calc(100vw - 32px);
+      max-height: calc(100dvh - 32px);
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    #panel h1 {
+      margin: 0;
+      font-family: Outfit, sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #panelToggle {
+      flex: none;
+      margin-left: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #panelToggle:hover { background: rgba(255,255,255,0.1); }
+    #panel.collapsed .panel-body { display: none; }
+    #panel.collapsed .status-row { margin-bottom: 0; }
+    .panel-body { min-width: 0; }
+    #settingsToggle {
+      width: 100%;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 9px 12px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #settingsToggle:hover { background: rgba(255,255,255,0.1); }
+    #settingsToggle .chevron {
+      color: var(--muted);
+      transition: transform 0.15s ease;
+    }
+    #settingsToggle[aria-expanded="true"] .chevron {
+      transform: rotate(180deg);
+    }
+    #moreSettings {
+      display: none;
+      min-width: 0;
+    }
+    #moreSettings.open { display: block; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0 12px;
+    }
+    #status {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    #refreshBtn {
+      flex: none;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #refreshBtn:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+    #refreshBtn:disabled { opacity: 0.55; cursor: wait; }
+    .route-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0;
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .route-toggle input { accent-color: var(--accent); }
+    .swatch {
+      width: 12px; height: 12px; border-radius: 999px; flex: none;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
+    }
+    .count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .route-toggle .remove {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .route-toggle .remove:hover { color: #ff8a80; }
+    .add-route {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      min-width: 0;
+      width: 100%;
+    }
+    .add-route-row {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+      min-width: 0;
+      width: 100%;
+    }
+    .add-route input {
+      flex: 1 1 0;
+      width: 0;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+    .add-route button {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .add-route button:hover { background: rgba(255,255,255,0.1); }
+    .search-results {
+      display: grid;
+      gap: 4px;
+      max-height: 160px;
+      overflow: auto;
+    }
+    .search-results:empty { display: none; }
+    .search-item {
+      display: grid;
+      gap: 2px;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .search-item:hover { background: rgba(255,255,255,0.08); }
+    .search-item strong { font-size: 13px; }
+    .search-item span { font-size: 11px; color: var(--muted); }
+    .path-mode {
+      display: grid;
+      gap: 6px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .path-mode .chk {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .path-mode .chk input { accent-color: var(--accent); }
+    .path-mode select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    #hint {
+      position: absolute; right: 16px; bottom: 28px; z-index: 10;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(12, 16, 22, 0.75);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+      backdrop-filter: blur(10px);
+    }
+    #hint a { color: #d7dde5; text-decoration: none; }
+
+    /* 나침반: 2D(정북)에서도 보이게 유지 → 다시 눌러 3D 복귀 */
+    .mapboxgl-ctrl-compass {
+      display: block !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+    }
+
+    .mapboxgl-popup-content {
+      background: #121820;
+      color: #f2f4f7;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      font-family: "IBM Plex Sans KR", sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .mapboxgl-popup-content strong {
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .mapboxgl-popup-close-button {
+      color: #9aa3af;
+      font-size: 18px;
+      padding: 2px 8px;
+    }
+    .mapboxgl-popup-close-button:hover {
+      background: transparent;
+      color: #ffffff;
+    }
+    .mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+    .mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+    .mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip {
+      border-bottom-color: #121820;
+    }
+    .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip,
+    .mapboxgl-popup-anchor-bottom-left .mapboxgl-popup-tip,
+    .mapboxgl-popup-anchor-bottom-right .mapboxgl-popup-tip {
+      border-top-color: #121820;
+    }
+    .mapboxgl-popup-anchor-left .mapboxgl-popup-tip {
+      border-right-color: #121820;
+    }
+    .mapboxgl-popup-anchor-right .mapboxgl-popup-tip {
+      border-left-color: #121820;
+    }
+    .popup-arrivals {
+      margin-top: 8px;
+      display: grid;
+      gap: 6px;
+      min-width: 160px;
+    }
+    .popup-arrival-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+    }
+    .popup-arrival-name {
+      font-weight: 600;
+      color: #ffe566;
+      white-space: nowrap;
+    }
+    .popup-arrival-eta {
+      color: #d7dde5;
+      text-align: right;
+    }
+    .popup-arrival-eta .next {
+      display: block;
+      color: #9aa3af;
+      font-size: 11px;
+      margin-top: 2px;
+    }
+    .popup-muted {
+      margin-top: 8px;
+      color: #9aa3af;
+      font-size: 12px;
+    }
+    .popup-fav-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .popup-fav-actions button {
+      flex: 1;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      color: #f2f4f7;
+      padding: 6px 8px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .popup-fav-actions button:hover { background: rgba(255,255,255,0.12); }
+    .popup-fav-actions button.active {
+      border-color: rgba(255, 90, 61, 0.55);
+      background: rgba(255, 90, 61, 0.18);
+      color: #ffc2b5;
+    }
+    .favorites {
+      display: grid;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    .favorites:empty { display: none; }
+    .fav-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.03);
+      padding: 10px 12px;
+      cursor: pointer;
+      text-align: left;
+      color: inherit;
+      font: inherit;
+      width: 100%;
+    }
+    .fav-card:hover { background: rgba(255,255,255,0.07); }
+    .fav-card-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .fav-badge {
+      flex: none;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(255, 90, 61, 0.2);
+      color: #ffb4a6;
+    }
+    .fav-badge.work {
+      background: rgba(30, 136, 229, 0.22);
+      color: #9fd0ff;
+    }
+    .fav-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .fav-remove {
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .fav-remove:hover { color: #ff8a80; }
+    .fav-arrivals {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .fav-arrival-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+    }
+    .fav-arrival-row strong { color: var(--bus); font-weight: 600; }
+    .fav-hint {
+      margin: 0 0 10px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    #panel.collapsed .fav-hint { display: none; }
+    .fav-hint.is-hidden { display: none; }
+    .alert-settings {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .alert-settings .title {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .alert-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+      flex-wrap: wrap;
+    }
+    .alert-row input[type="checkbox"] { accent-color: var(--accent); }
+    .alert-row select,
+    .alert-row input[type="time"] {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      padding: 4px 8px;
+      font: inherit;
+      color-scheme: dark;
+    }
+    .alert-note {
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+    .commute-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    .commute-bar.is-hidden { display: none; }
+    #commuteToggle {
+      flex: none;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #commuteToggle:hover { background: rgba(255,255,255,0.1); }
+    #commuteToggle.active {
+      border-color: rgba(255, 90, 61, 0.55);
+      background: rgba(255, 90, 61, 0.18);
+      color: #ffc2b5;
+    }
+    .commute-label {
+      flex: 1;
+      min-width: 0;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    #commuteBoard {
+      display: none;
+      gap: 10px;
+      margin: 0 0 12px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 90, 61, 0.28);
+      background: linear-gradient(160deg, rgba(255,90,61,0.14), rgba(255,255,255,0.03));
+    }
+    #commuteBoard.active { display: grid; }
+    .commute-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .commute-head strong {
+      font-size: 15px;
+      color: #fff;
+    }
+    .commute-head span {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .commute-stop {
+      font-size: 12px;
+      color: #d7dde5;
+    }
+    .commute-list {
+      display: grid;
+      gap: 8px;
+    }
+    .commute-row {
+      display: grid;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      text-align: left;
+      color: inherit;
+      font: inherit;
+      width: 100%;
+    }
+    .commute-row:hover { background: rgba(0,0,0,0.32); }
+    .commute-row-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .commute-route {
+      font-size: 16px;
+      font-weight: 700;
+      color: #ffe566;
+    }
+    .commute-eta {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .commute-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .commute-empty {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #panel.commute-on .favorites { display: none; }
+    #panel.commute-on .fav-hint { display: none; }
+
+    #error {
+      display: none;
+      position: absolute; inset: 0; z-index: 20;
+      place-items: center;
+      background: #0b0f14;
+      padding: 24px;
+      text-align: center;
+    }
+    #error.show { display: grid; }
+    #error h2 { font-family: Outfit, sans-serif; margin: 0 0 8px; }
+    #error p { color: var(--muted); max-width: 420px; line-height: 1.5; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panel">
+    <div class="panel-header">
+      <h1>광역버스 3D</h1>
+      <button type="button" id="panelToggle" aria-expanded="true" title="패널 접기/펼치기">접기</button>
+    </div>
+    <div class="status-row">
+      <div id="status">불러오는 중…</div>
+      <button type="button" id="refreshBtn" title="지금 위치 다시 불러오기">새로고침</button>
+    </div>
+    <div class="commute-bar" id="commuteBar">
+      <button type="button" id="commuteToggle" title="퇴근 모드">퇴근 모드</button>
+      <div class="commute-label" id="commuteLabel">평일 저녁에 회사 정류장 도착을 크게 보여줍니다.</div>
+    </div>
+    <div id="commuteBoard"></div>
+    <p class="fav-hint" id="favHint">정류장을 눌러 집·회사로 저장하면 여기에 도착정보가 표시됩니다.</p>
+    <div id="favorites" class="favorites"></div>
+    <div class="panel-body">
+      <div id="routes"></div>
+      <div class="add-route">
+        <div class="add-route-row">
+          <input id="routeQuery" type="text" placeholder="버스 번호" inputmode="search" />
+          <button type="button" id="routeSearchBtn">검색</button>
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+      <button type="button" id="settingsToggle" aria-expanded="false" aria-controls="moreSettings">
+        <span>설정</span>
+        <span class="chevron">▾</span>
+      </button>
+      <div id="moreSettings">
+        <label class="path-mode">
+          <span class="chk">
+            <input type="checkbox" id="showStations" checked />
+            정류장 표시
+          </span>
+        </label>
+        <div class="alert-settings">
+          <div class="title">알림 (집·회사 정류장)</div>
+          <label class="alert-row">
+            <input type="checkbox" id="arrivalAlert" />
+            도착
+            <select id="arrivalMinutes" aria-label="몇 분 전 알림">
+              <option value="3">3분</option>
+              <option value="5" selected>5분</option>
+              <option value="7">7분</option>
+              <option value="10">10분</option>
+            </select>
+            전
+          </label>
+          <label class="alert-row">
+            <input type="checkbox" id="fullAlert" />
+            만차일 때 알림
+          </label>
+          <div class="alert-note" id="alertNote">페이지를 켠 동안만 브라우저 알림이 옵니다. 집·회사 정류장을 먼저 저장하세요.</div>
+        </div>
+        <div class="alert-settings">
+          <div class="title">퇴근 모드</div>
+          <label class="alert-row">
+            <input type="checkbox" id="commuteAuto" checked />
+            평일 자동 켜기
+          </label>
+          <label class="alert-row">
+            <span>시간</span>
+            <input type="time" id="commuteStart" value="17:30" />
+            ~
+            <input type="time" id="commuteEnd" value="21:00" />
+          </label>
+          <label class="alert-row">
+            기준 정류장
+            <select id="commuteStop">
+              <option value="work" selected>회사</option>
+              <option value="home">집</option>
+              <option value="both">회사+집</option>
+            </select>
+          </label>
+          <div class="alert-note">자동 시간대에는 퇴근 모드가 켜지고, 도착 요약을 먼저 보여줍니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="hint">드래그 · 스크롤 · Ctrl+드래그로 기울기 · <a href="/map2d.html">2D로 전환</a></div>
+  <div id="error">
+    <div>
+      <h2 id="errorTitle">오류</h2>
+      <p id="errorMsg"></p>
+    </div>
+  </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+  <script>
+    const STORAGE_KEY = 'bus-tracker-routes-v2';
+    const SETTINGS_KEY = 'bus-tracker-settings-v1';
+    const FAVORITES_KEY = 'bus-tracker-favorites-v1';
+    const FAV_LABELS = { home: '집', work: '회사' };
+    const DEFAULT_ROUTES = [
+      { routeId: '234001245', name: 'M4108', color: '#e53935' },
+      { routeId: '233000270', name: '4108', color: '#1e88e5' },
+    ];
+    const ROUTE_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00897b', '#f4511e', '#3949ab'];
+    const REFRESH_MS = 30000;
+
+    let ROUTES = loadSavedRoutes();
+
+    const statusEl = document.getElementById('status');
+    const routesEl = document.getElementById('routes');
+    const favoritesEl = document.getElementById('favorites');
+    const favHintEl = document.getElementById('favHint');
+    const searchResultsEl = document.getElementById('searchResults');
+    const routeQueryEl = document.getElementById('routeQuery');
+    const errorEl = document.getElementById('error');
+    const errorTitle = document.getElementById('errorTitle');
+    const errorMsg = document.getElementById('errorMsg');
+
+    const state = {};
+    let favorites = loadFavorites();
+    let favoriteMarkers = {};
+    const alertNotified = new Map(); // key -> true while condition active
+    let commuteManual = null; // null=auto, true=force on, false=force off
+    let commuteActive = false;
+    let commuteCache = {}; // role -> arrivals
+
+    function parseHm(hm) {
+      const [h, m] = String(hm || '0:0').split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    }
+
+    function getCommuteSettings() {
+      return {
+        auto: document.getElementById('commuteAuto')?.checked ?? true,
+        start: document.getElementById('commuteStart')?.value || '17:30',
+        end: document.getElementById('commuteEnd')?.value || '21:00',
+        stop: document.getElementById('commuteStop')?.value || 'work',
+      };
+    }
+
+    function isCommuteTimeWindow() {
+      const cfg = getCommuteSettings();
+      if (!cfg.auto) return false;
+      const now = new Date();
+      const day = now.getDay(); // 0 Sun .. 6 Sat
+      if (day === 0 || day === 6) return false;
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const start = parseHm(cfg.start);
+      const end = parseHm(cfg.end);
+      if (start <= end) return mins >= start && mins <= end;
+      // overnight range
+      return mins >= start || mins <= end;
+    }
+
+    function resolveCommuteActive() {
+      if (commuteManual === true) return true;
+      if (commuteManual === false) return false;
+      return isCommuteTimeWindow();
+    }
+
+    function commuteRoles() {
+      const stop = getCommuteSettings().stop;
+      const roles = [];
+      if (stop === 'home' || stop === 'both') {
+        if (favorites.home) roles.push('home');
+      }
+      if (stop === 'work' || stop === 'both') {
+        if (favorites.work) roles.push('work');
+      }
+      // fallback: whichever exists
+      if (!roles.length) {
+        if (favorites.work) roles.push('work');
+        else if (favorites.home) roles.push('home');
+      }
+      return roles;
+    }
+
+    function updateCommuteUi() {
+      commuteActive = resolveCommuteActive();
+      const panel = document.getElementById('panel');
+      const btn = document.getElementById('commuteToggle');
+      const label = document.getElementById('commuteLabel');
+      const board = document.getElementById('commuteBoard');
+      panel.classList.toggle('commute-on', commuteActive);
+      btn.classList.toggle('active', commuteActive);
+      btn.textContent = commuteActive ? '퇴근 모드 ON' : '퇴근 모드';
+
+      if (commuteManual === true) {
+        label.textContent = '수동으로 켠 상태입니다. 다시 누르면 끕니다.';
+      } else if (commuteManual === false) {
+        label.textContent = '수동으로 끈 상태입니다. 다시 누르면 자동으로 돌아갑니다.';
+      } else if (isCommuteTimeWindow()) {
+        label.textContent = '평일 퇴근 시간대라 자동으로 켜져 있습니다.';
+      } else {
+        const cfg = getCommuteSettings();
+        label.textContent = cfg.auto
+          ? `평일 ${cfg.start}~${cfg.end}에 자동으로 켜집니다.`
+          : '자동이 꺼져 있습니다. 버튼을 눌러 직접 켜세요.';
+      }
+
+      if (!commuteActive) {
+        board.classList.remove('active');
+        board.innerHTML = '';
+        return;
+      }
+      renderCommuteBoard();
+    }
+
+    function renderCommuteBoard() {
+      const board = document.getElementById('commuteBoard');
+      const roles = commuteRoles();
+      if (!roles.length) {
+        board.classList.add('active');
+        board.innerHTML = `<div class="commute-empty">회사(또는 집) 정류장을 저장하면 퇴근 요약이 표시됩니다.</div>`;
+        return;
+      }
+
+      board.classList.add('active');
+      board.innerHTML = roles.map(role => {
+        const fav = favorites[role];
+        const arrivals = commuteCache[role]?.arrivals;
+        const error = commuteCache[role]?.error;
+        let body = '';
+        if (error) {
+          body = `<div class="commute-empty">${escapeHtml(error)}</div>`;
+        } else if (!arrivals) {
+          body = `<div class="commute-empty">도착정보 불러오는 중…</div>`;
+        } else if (!arrivals.length) {
+          body = `<div class="commute-empty">추가한 노선의 도착정보가 없습니다.</div>`;
+        } else {
+          body = `<div class="commute-list">${arrivals.map(a => {
+            const seat = a.remainSeat1 === 0
+              ? '만차'
+              : (a.remainSeat1 != null && a.remainSeat1 >= 0 ? `${a.remainSeat1}석` : '');
+            const next = a.eta2 ? `다음 ${escapeHtml(a.eta2)}` : '';
+            const meta = [seat, next].filter(Boolean).join(' · ');
+            return `<button type="button" class="commute-row" data-commute-role="${role}">
+              <div class="commute-row-top">
+                <span class="commute-route">${escapeHtml(a.routeName || a.routeId)}</span>
+                <span class="commute-eta">${escapeHtml(a.eta1 || '정보 없음')}</span>
+              </div>
+              ${meta ? `<div class="commute-meta">${escapeHtml(meta)}</div>` : ''}
+            </button>`;
+          }).join('')}</div>`;
+        }
+        return `<div>
+          <div class="commute-head">
+            <strong>${FAV_LABELS[role]}</strong>
+            <span>탈까 말까</span>
+          </div>
+          <div class="commute-stop">${escapeHtml(fav.name)}</div>
+          ${body}
+        </div>`;
+      }).join('');
+
+      board.querySelectorAll('[data-commute-role]').forEach(el => {
+        el.addEventListener('click', () => {
+          focusFavorite(el.getAttribute('data-commute-role'));
+        });
+      });
+    }
+
+    function wireCommuteMode() {
+      document.getElementById('commuteToggle').addEventListener('click', () => {
+        if (commuteManual === null) {
+          commuteManual = !resolveCommuteActive();
+        } else if (commuteManual === true) {
+          commuteManual = false;
+        } else {
+          commuteManual = null; // back to auto
+        }
+        updateCommuteUi();
+        if (commuteActive) refreshFavoriteArrivals().catch(console.warn);
+      });
+
+      ['commuteAuto', 'commuteStart', 'commuteEnd', 'commuteStop'].forEach(id => {
+        document.getElementById(id).addEventListener('change', () => {
+          if (id !== 'commuteStop') commuteManual = null;
+          saveSettings();
+          updateCommuteUi();
+          if (commuteActive) refreshFavoriteArrivals().catch(console.warn);
+        });
+      });
+
+      // 1분마다 시간대 재평가
+      setInterval(() => {
+        const before = commuteActive;
+        updateCommuteUi();
+        if (!before && commuteActive) refreshFavoriteArrivals().catch(console.warn);
+      }, 60000);
+    }
+
+    function getAlertSettings() {
+      return {
+        arrivalAlert: document.getElementById('arrivalAlert')?.checked ?? false,
+        arrivalMinutes: Number(document.getElementById('arrivalMinutes')?.value || 5),
+        fullAlert: document.getElementById('fullAlert')?.checked ?? false,
+      };
+    }
+
+    function updateAlertNote() {
+      const note = document.getElementById('alertNote');
+      if (!note) return;
+      if (!('Notification' in window)) {
+        note.textContent = '이 브라우저는 알림을 지원하지 않습니다.';
+        return;
+      }
+      const perm = Notification.permission;
+      if (perm === 'denied') {
+        note.textContent = '알림이 차단되어 있습니다. 브라우저 사이트 설정에서 허용해 주세요.';
+      } else if (perm === 'granted') {
+        note.textContent = '페이지를 켠 동안 집·회사 정류장 기준으로 알림이 옵니다.';
+      } else {
+        note.textContent = '알림을 켜면 권한 요청이 뜹니다. 집·회사 정류장을 먼저 저장하세요.';
+      }
+    }
+
+    async function ensureNotificationPermission() {
+      if (!('Notification' in window)) return false;
+      if (Notification.permission === 'granted') return true;
+      if (Notification.permission === 'denied') {
+        updateAlertNote();
+        return false;
+      }
+      const result = await Notification.requestPermission();
+      updateAlertNote();
+      return result === 'granted';
+    }
+
+    function showBusNotification(title, body, tag) {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      try {
+        const n = new Notification(title, {
+          body,
+          tag,
+          renotify: false,
+          silent: false,
+        });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch (err) {
+        console.warn('notification failed', err);
+      }
+    }
+
+    function evaluateAlerts(role, fav, arrivals) {
+      const cfg = getAlertSettings();
+      if (!cfg.arrivalAlert && !cfg.fullAlert) return;
+      if (!arrivals?.length) return;
+
+      const thresholdSec = Math.max(1, cfg.arrivalMinutes) * 60;
+
+      arrivals.forEach(a => {
+        const routeName = a.routeName || a.routeId;
+        const place = `${FAV_LABELS[role]} · ${fav.name}`;
+        const etaSec = Number.isFinite(a.etaSec1) ? a.etaSec1 : null;
+        const plate = a.plateNo1 || 'bus1';
+
+        if (cfg.arrivalAlert && etaSec != null && a.flag !== 'STOP' && a.flag !== 'WAIT') {
+          const key = `arr:${role}:${a.routeId}:${plate}`;
+          if (etaSec <= thresholdSec && !alertNotified.has(key)) {
+            const etaText = a.eta1 || `${Math.ceil(etaSec / 60)}분 후`;
+            showBusNotification(
+              `${routeName} ${cfg.arrivalMinutes}분 전`,
+              `${place} · ${etaText} 도착 예정`,
+              key
+            );
+            alertNotified.set(key, true);
+          }
+          if (etaSec > thresholdSec) alertNotified.delete(key);
+        }
+
+        if (cfg.fullAlert && a.remainSeat1 === 0) {
+          const key = `full:${role}:${a.routeId}:${plate}`;
+          if (!alertNotified.has(key)) {
+            const etaText = a.eta1 ? ` · ${a.eta1}` : '';
+            showBusNotification(
+              `${routeName} 만차`,
+              `${place}${etaText}`,
+              key
+            );
+            alertNotified.set(key, true);
+          }
+        } else if (a.remainSeat1 == null || a.remainSeat1 > 0) {
+          alertNotified.delete(`full:${role}:${a.routeId}:${plate}`);
+        }
+      });
+    }
+
+    function loadFavorites() {
+      try {
+        const raw = localStorage.getItem(FAVORITES_KEY);
+        if (!raw) return { home: null, work: null };
+        const parsed = JSON.parse(raw) || {};
+        const clean = (v) => {
+          if (!v || !v.stationId || !v.name) return null;
+          const lat = Number(v.lat);
+          const lng = Number(v.lng);
+          return {
+            stationId: String(v.stationId),
+            name: String(v.name),
+            lat: Number.isFinite(lat) ? lat : null,
+            lng: Number.isFinite(lng) ? lng : null,
+          };
+        };
+        return { home: clean(parsed.home), work: clean(parsed.work) };
+      } catch {
+        return { home: null, work: null };
+      }
+    }
+
+    function saveFavorites() {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    }
+
+    function favoriteRoleForStation(stationId) {
+      if (!stationId) return null;
+      if (favorites.home?.stationId === String(stationId)) return 'home';
+      if (favorites.work?.stationId === String(stationId)) return 'work';
+      return null;
+    }
+
+    function setFavorite(role, station) {
+      if (role !== 'home' && role !== 'work') return;
+      const next = {
+        stationId: String(station.stationId),
+        name: String(station.name || '정류장'),
+        lat: station.lat != null ? Number(station.lat) : null,
+        lng: station.lng != null ? Number(station.lng) : null,
+      };
+      // 같은 정류장을 다른 역할에 중복 저장하지 않음
+      if (role === 'home' && favorites.work?.stationId === next.stationId) favorites.work = null;
+      if (role === 'work' && favorites.home?.stationId === next.stationId) favorites.home = null;
+      favorites[role] = next;
+      saveFavorites();
+      renderFavorites();
+      refreshFavoriteArrivals().catch(console.warn);
+      syncFavoriteMarkers();
+      statusEl.textContent = `${FAV_LABELS[role]} 정류장 저장: ${next.name}`;
+    }
+
+    function clearFavorite(role) {
+      if (!favorites[role]) return;
+      const name = favorites[role].name;
+      favorites[role] = null;
+      saveFavorites();
+      renderFavorites();
+      syncFavoriteMarkers();
+      statusEl.textContent = `${FAV_LABELS[role]} 정류장 해제: ${name}`;
+    }
+
+    function renderFavoritesShell() {
+      const hasAny = !!(favorites.home || favorites.work);
+      favHintEl.classList.toggle('is-hidden', hasAny);
+      favoritesEl.innerHTML = '';
+      ['home', 'work'].forEach(role => {
+        const fav = favorites[role];
+        if (!fav) return;
+        const card = document.createElement('div');
+        card.className = 'fav-card';
+        card.dataset.role = role;
+        card.innerHTML = `
+          <div class="fav-card-top">
+            <span class="fav-badge ${role}">${FAV_LABELS[role]}</span>
+            <span class="fav-name">${escapeHtml(fav.name)}</span>
+            <button type="button" class="fav-remove" title="즐겨찾기 해제" data-clear="${role}">×</button>
+          </div>
+          <div class="fav-arrivals" id="fav-arrivals-${role}">도착정보 불러오는 중…</div>`;
+        favoritesEl.appendChild(card);
+
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('[data-clear]')) return;
+          focusFavorite(role);
+        });
+        card.querySelector('[data-clear]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearFavorite(role);
+        });
+      });
+    }
+
+    function renderFavorites() {
+      renderFavoritesShell();
+    }
+
+    function focusFavorite(role) {
+      const fav = favorites[role];
+      if (!fav || fav.lng == null || fav.lat == null || !map) return;
+      map.flyTo({
+        center: [fav.lng, fav.lat],
+        zoom: Math.max(map.getZoom(), 14),
+        pitch: map.getPitch(),
+        bearing: map.getBearing(),
+        duration: 1000,
+      });
+      openStationPopup([fav.lng, fav.lat], fav.name, fav.stationId).catch(console.warn);
+    }
+
+    function syncFavoriteMarkers() {
+      if (!map) return;
+      Object.values(favoriteMarkers).forEach(m => m.remove());
+      favoriteMarkers = {};
+      ['home', 'work'].forEach(role => {
+        const fav = favorites[role];
+        if (!fav || fav.lng == null || fav.lat == null) return;
+        const el = document.createElement('div');
+        el.style.cssText = [
+          'padding:4px 8px',
+          'border-radius:999px',
+          'font:600 11px "IBM Plex Sans KR",sans-serif',
+          'color:#fff',
+          'box-shadow:0 4px 14px rgba(0,0,0,.4)',
+          'border:1px solid rgba(255,255,255,.2)',
+          role === 'home' ? 'background:#c4472f' : 'background:#1e88e5',
+        ].join(';');
+        el.textContent = FAV_LABELS[role];
+        const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([fav.lng, fav.lat])
+          .addTo(map);
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', () => focusFavorite(role));
+        favoriteMarkers[role] = marker;
+      });
+    }
+
+    async function refreshFavoriteArrivals() {
+      const roles = ['home', 'work'].filter(role => favorites[role]);
+      if (!roles.length) {
+        updateCommuteUi();
+        return;
+      }
+      await Promise.all(roles.map(async (role) => {
+        const box = document.getElementById(`fav-arrivals-${role}`);
+        const fav = favorites[role];
+        try {
+          const { arrivals, error } = await fetchStationArrivals(fav.stationId);
+          commuteCache[role] = { arrivals, error };
+          if (box) {
+            if (error) {
+              box.textContent = error;
+            } else if (!arrivals.length) {
+              box.textContent = '추가한 노선의 도착정보가 없습니다.';
+            } else {
+              box.innerHTML = arrivals.map(a => {
+                const seat = (a.remainSeat1 != null && a.remainSeat1 >= 0) ? ` · ${a.remainSeat1}석` : '';
+                const next = a.eta2 ? ` / 다음 ${escapeHtml(a.eta2)}` : '';
+                return `<div class="fav-arrival-row"><strong>${escapeHtml(a.routeName || a.routeId)}</strong><span>${escapeHtml(a.eta1 || '정보 없음')}${seat}${next}</span></div>`;
+              }).join('');
+            }
+          }
+          if (!error && arrivals?.length) evaluateAlerts(role, fav, arrivals);
+        } catch (err) {
+          commuteCache[role] = { arrivals: [], error: String(err?.message || err) };
+          if (box) box.textContent = String(err?.message || err);
+        }
+      }));
+      updateCommuteUi();
+    }
+
+    function loadSavedRoutes() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return DEFAULT_ROUTES.map(r => ({ ...r }));
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed) || !parsed.length) return DEFAULT_ROUTES.map(r => ({ ...r }));
+        return parsed
+          .filter(r => r && r.routeId && r.name)
+          .map(r => ({
+            routeId: String(r.routeId),
+            name: String(r.name),
+            color: r.color || ROUTE_COLORS[0],
+          }));
+      } catch {
+        return DEFAULT_ROUTES.map(r => ({ ...r }));
+      }
+    }
+
+    function saveRoutes() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(ROUTES));
+    }
+
+    function loadSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveSettings() {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        showStations: document.getElementById('showStations').checked,
+        panelCollapsed: document.getElementById('panel').classList.contains('collapsed'),
+        settingsOpen: document.getElementById('moreSettings').classList.contains('open'),
+        arrivalAlert: document.getElementById('arrivalAlert').checked,
+        arrivalMinutes: Number(document.getElementById('arrivalMinutes').value || 5),
+        fullAlert: document.getElementById('fullAlert').checked,
+        commuteAuto: document.getElementById('commuteAuto').checked,
+        commuteStart: document.getElementById('commuteStart').value || '17:30',
+        commuteEnd: document.getElementById('commuteEnd').value || '21:00',
+        commuteStop: document.getElementById('commuteStop').value || 'work',
+      }));
+    }
+
+    function applySettings() {
+      const s = loadSettings();
+      const showStationsEl = document.getElementById('showStations');
+      if (typeof s.showStations === 'boolean') showStationsEl.checked = s.showStations;
+      if (typeof s.arrivalAlert === 'boolean') document.getElementById('arrivalAlert').checked = s.arrivalAlert;
+      if (s.arrivalMinutes) document.getElementById('arrivalMinutes').value = String(s.arrivalMinutes);
+      if (typeof s.fullAlert === 'boolean') document.getElementById('fullAlert').checked = s.fullAlert;
+      if (typeof s.commuteAuto === 'boolean') document.getElementById('commuteAuto').checked = s.commuteAuto;
+      if (s.commuteStart) document.getElementById('commuteStart').value = s.commuteStart;
+      if (s.commuteEnd) document.getElementById('commuteEnd').value = s.commuteEnd;
+      if (s.commuteStop) document.getElementById('commuteStop').value = s.commuteStop;
+      updateAlertNote();
+      updateCommuteUi();
+    }
+
+    function setSettingsOpen(open, persist = true) {
+      const box = document.getElementById('moreSettings');
+      const btn = document.getElementById('settingsToggle');
+      box.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.querySelector('span').textContent = open ? '설정 접기' : '설정';
+      if (persist) saveSettings();
+    }
+
+    function initSettingsCollapse() {
+      const s = loadSettings();
+      const open = typeof s.settingsOpen === 'boolean'
+        ? s.settingsOpen
+        : !isNarrowScreen();
+      setSettingsOpen(open, false);
+      document.getElementById('settingsToggle').addEventListener('click', () => {
+        setSettingsOpen(!document.getElementById('moreSettings').classList.contains('open'));
+      });
+    }
+
+    function wireAlertSettings() {
+      const arrivalAlertEl = document.getElementById('arrivalAlert');
+      const fullAlertEl = document.getElementById('fullAlert');
+      const arrivalMinutesEl = document.getElementById('arrivalMinutes');
+
+      const onToggle = async (el) => {
+        if (el.checked) {
+          const ok = await ensureNotificationPermission();
+          if (!ok) {
+            el.checked = false;
+            statusEl.textContent = '알림 권한이 없어 설정을 켤 수 없습니다.';
+          }
+        }
+        saveSettings();
+        updateAlertNote();
+      };
+
+      arrivalAlertEl.addEventListener('change', () => onToggle(arrivalAlertEl));
+      fullAlertEl.addEventListener('change', () => onToggle(fullAlertEl));
+      arrivalMinutesEl.addEventListener('change', () => {
+        // 임계값 바꾸면 같은 차량도 다시 알림 가능하도록 도착 알림 키 초기화
+        for (const key of [...alertNotified.keys()]) {
+          if (key.startsWith('arr:')) alertNotified.delete(key);
+        }
+        saveSettings();
+      });
+    }
+
+    function isNarrowScreen() {
+      return window.matchMedia('(max-width: 640px)').matches;
+    }
+
+    function setPanelCollapsed(collapsed, persist = true) {
+      const panel = document.getElementById('panel');
+      const btn = document.getElementById('panelToggle');
+      panel.classList.toggle('collapsed', collapsed);
+      btn.textContent = collapsed ? '펼치기' : '접기';
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      if (persist) saveSettings();
+    }
+
+    function initPanelCollapse() {
+      const s = loadSettings();
+      const collapsed = typeof s.panelCollapsed === 'boolean'
+        ? s.panelCollapsed
+        : isNarrowScreen();
+      setPanelCollapsed(collapsed, false);
+      document.getElementById('panelToggle').addEventListener('click', () => {
+        setPanelCollapsed(!document.getElementById('panel').classList.contains('collapsed'));
+      });
+    }
+
+    function nextRouteColor() {
+      const used = new Set(ROUTES.map(r => r.color));
+      return ROUTE_COLORS.find(c => !used.has(c)) || ROUTE_COLORS[ROUTES.length % ROUTE_COLORS.length];
+    }
+
+    function ensureState(rt) {
+      if (state[rt.routeId]) return;
+      state[rt.routeId] = {
+        visible: true,
+        showStations: document.getElementById('showStations')?.checked ?? true,
+        stations: [],
+        path: [],
+        buses: [],
+        prevPos: {},
+      };
+    }
+
+    function removeRouteLayers(routeId) {
+      if (!map) {
+        delete state[routeId];
+        return;
+      }
+      [
+        `buses-${routeId}`,
+        `station-labels-${routeId}`,
+        `stations-${routeId}`,
+        `route-line-${routeId}`,
+      ].forEach(id => {
+        if (map.getLayer(id)) map.removeLayer(id);
+      });
+      [
+        `src-bus-${routeId}`,
+        `src-station-${routeId}`,
+        `src-route-${routeId}`,
+      ].forEach(id => {
+        if (map.getSource(id)) map.removeSource(id);
+      });
+      delete state[routeId];
+    }
+
+    function renderRouteList() {
+      routesEl.innerHTML = '';
+      ROUTES.forEach(rt => {
+        ensureState(rt);
+        const row = document.createElement('div');
+        row.className = 'route-toggle';
+        row.innerHTML = `
+          <label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0">
+            <input type="checkbox" ${state[rt.routeId].visible ? 'checked' : ''} data-route="${rt.routeId}">
+            <span class="swatch" style="background:${rt.color}"></span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rt.name}</span>
+            <span class="count" id="cnt-${rt.routeId}">-</span>
+          </label>
+          <button type="button" class="remove" title="노선 삭제" data-remove="${rt.routeId}">×</button>`;
+        routesEl.appendChild(row);
+
+        row.querySelector('input').addEventListener('change', e => {
+          state[rt.routeId].visible = e.target.checked;
+          setLayerVisibility(rt.routeId, e.target.checked);
+        });
+        row.querySelector('[data-remove]').addEventListener('click', () => {
+          removeRoute(rt.routeId);
+        });
+      });
+    }
+
+    async function addRoute(route) {
+      const routeId = String(route.routeId);
+      if (ROUTES.some(r => r.routeId === routeId)) {
+        statusEl.textContent = `${route.routeName || route.name} 은(는) 이미 추가되어 있습니다.`;
+        return;
+      }
+      const rt = {
+        routeId,
+        name: String(route.routeName || route.name),
+        color: nextRouteColor(),
+      };
+      ROUTES.push(rt);
+      saveRoutes();
+      ensureState(rt);
+      renderRouteList();
+      searchResultsEl.innerHTML = '';
+      routeQueryEl.value = '';
+
+      if (!map) return;
+      const pathMode = 'official';
+      statusEl.textContent = `${rt.name} 노선 불러오는 중…`;
+      await loadRoute(rt, pathMode);
+      await loadBuses(rt);
+      syncLayers();
+      statusEl.textContent = `${rt.name} 추가됨`;
+    }
+
+    function removeRoute(routeId) {
+      const rt = ROUTES.find(r => r.routeId === routeId);
+      if (!rt) return;
+      ROUTES = ROUTES.filter(r => r.routeId !== routeId);
+      saveRoutes();
+      removeRouteLayers(routeId);
+      renderRouteList();
+      if (map) syncLayers();
+      statusEl.textContent = `${rt.name} 삭제됨`;
+    }
+
+    async function searchRoutes() {
+      const q = routeQueryEl.value.trim();
+      if (!q) {
+        statusEl.textContent = '버스 번호를 입력하세요.';
+        return;
+      }
+      statusEl.textContent = `"${q}" 검색 중…`;
+      searchResultsEl.innerHTML = '';
+      try {
+        const r = await fetch(`/api/find?q=${encodeURIComponent(q)}`);
+        const data = await r.json();
+        const routes = data.routes || [];
+        if (!routes.length) {
+          statusEl.textContent = `"${q}" 검색 결과가 없습니다.`;
+          return;
+        }
+        routes.forEach(item => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'search-item';
+          btn.innerHTML = `<strong>${item.routeName}</strong><span>${item.region || ''} · ${item.type || ''} · ${item.routeId}</span>`;
+          btn.addEventListener('click', () => addRoute(item));
+          searchResultsEl.appendChild(btn);
+        });
+        statusEl.textContent = `${routes.length}개 노선 찾음 · 눌러서 추가`;
+      } catch (err) {
+        statusEl.textContent = `검색 실패: ${err.message || err}`;
+      }
+    }
+
+    applySettings();
+    initPanelCollapse();
+    initSettingsCollapse();
+    renderRouteList();
+    renderFavorites();
+    wireFavoritePopupActions();
+    wireAlertSettings();
+    wireCommuteMode();
+
+    let map;
+    let didFit = false;
+
+    function showError(title, message) {
+      errorTitle.textContent = title;
+      errorMsg.textContent = message;
+      errorEl.classList.add('show');
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function arrivalPopupHtml(stationName, arrivals, meta = {}) {
+      const title = `<strong>${escapeHtml(stationName || '정류장')}</strong>`;
+      let body = '';
+      if (meta.loading) {
+        body = `<div class="popup-muted">도착정보 불러오는 중…</div>`;
+      } else if (meta.error) {
+        body = `<div class="popup-muted">${escapeHtml(meta.error)}</div>`;
+      } else if (!arrivals?.length) {
+        body = `<div class="popup-muted">추가한 노선의 도착정보가 없습니다.</div>`;
+      } else {
+        const rows = arrivals.map(a => {
+          const name = escapeHtml(a.routeName || a.routeId);
+          const eta1 = escapeHtml(a.eta1 || '정보 없음');
+          const seat = (a.remainSeat1 != null && a.remainSeat1 >= 0)
+            ? ` · ${a.remainSeat1}석`
+            : '';
+          const next = a.eta2
+            ? `<span class="next">다음 ${escapeHtml(a.eta2)}</span>`
+            : '';
+          return `<div class="popup-arrival-row">
+            <span class="popup-arrival-name">${name}</span>
+            <span class="popup-arrival-eta">${eta1}${seat}${next}</span>
+          </div>`;
+        }).join('');
+        body = `<div class="popup-arrivals">${rows}</div>`;
+      }
+
+      const sid = meta.stationId ? String(meta.stationId) : '';
+      const role = sid ? favoriteRoleForStation(sid) : null;
+      const lat = meta.lat != null ? Number(meta.lat) : '';
+      const lng = meta.lng != null ? Number(meta.lng) : '';
+      const actions = sid ? `
+        <div class="popup-fav-actions">
+          <button type="button" class="${role === 'home' ? 'active' : ''}"
+            data-fav-role="home"
+            data-station-id="${escapeHtml(sid)}"
+            data-station-name="${escapeHtml(stationName || '정류장')}"
+            data-lat="${lat}"
+            data-lng="${lng}">${role === 'home' ? '집 해제' : '집으로'}</button>
+          <button type="button" class="${role === 'work' ? 'active' : ''}"
+            data-fav-role="work"
+            data-station-id="${escapeHtml(sid)}"
+            data-station-name="${escapeHtml(stationName || '정류장')}"
+            data-lat="${lat}"
+            data-lng="${lng}">${role === 'work' ? '회사 해제' : '회사로'}</button>
+        </div>` : '';
+
+      return `${title}${body}${actions}`;
+    }
+
+    async function fetchStationArrivals(stationId) {
+      const routeIds = ROUTES.map(r => r.routeId).join(',');
+      const r = await fetch(
+        `/api/arrival?stationId=${encodeURIComponent(stationId)}&routeIds=${encodeURIComponent(routeIds)}`
+      );
+      const data = await r.json();
+      if (data.rateLimited || data.authError || data.error) {
+        return {
+          arrivals: [],
+          error: data.error
+            || data.authError?.returnAuthMsg
+            || data.authError?.errMsg
+            || '도착정보를 불러오지 못했습니다.',
+        };
+      }
+      // 화면 표시 이름은 사용자가 추가한 노선명 우선
+      const nameById = Object.fromEntries(ROUTES.map(rt => [rt.routeId, rt.name]));
+      const arrivals = (data.arrivals || []).map(a => ({
+        ...a,
+        routeName: nameById[a.routeId] || a.routeName,
+      }));
+      return { arrivals };
+    }
+
+    async function openStationPopup(lngLat, stationName, stationId) {
+      document.querySelectorAll('.mapboxgl-popup').forEach(el => el.remove());
+      const lng = Array.isArray(lngLat) ? lngLat[0] : lngLat.lng;
+      const lat = Array.isArray(lngLat) ? lngLat[1] : lngLat.lat;
+      const metaBase = { stationId, lat, lng };
+      const popup = new mapboxgl.Popup({ offset: 12, maxWidth: '280px' })
+        .setLngLat(lngLat)
+        .setHTML(arrivalPopupHtml(stationName, [], { loading: true, ...metaBase }))
+        .addTo(map);
+
+      if (!stationId) {
+        popup.setHTML(arrivalPopupHtml(stationName, [], {
+          error: '정류소 ID가 없어 도착정보를 조회할 수 없습니다.',
+          ...metaBase,
+        }));
+        return;
+      }
+
+      try {
+        const { arrivals, error } = await fetchStationArrivals(stationId);
+        if (!popup.isOpen()) return;
+        popup.setHTML(arrivalPopupHtml(stationName, arrivals, { error, ...metaBase }));
+      } catch (err) {
+        if (!popup.isOpen()) return;
+        popup.setHTML(arrivalPopupHtml(stationName, [], {
+          error: String(err?.message || err),
+          ...metaBase,
+        }));
+      }
+    }
+
+    function wireFavoritePopupActions() {
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-fav-role]');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const role = btn.getAttribute('data-fav-role');
+        const stationId = btn.getAttribute('data-station-id');
+        if (!role || !stationId) return;
+        const name = btn.getAttribute('data-station-name') || '정류장';
+        const lat = Number(btn.getAttribute('data-lat'));
+        const lng = Number(btn.getAttribute('data-lng'));
+        if (favoriteRoleForStation(stationId) === role) {
+          clearFavorite(role);
+        } else {
+          setFavorite(role, { stationId, name, lat, lng });
+        }
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          openStationPopup([lng, lat], name, stationId).catch(console.warn);
+        }
+      });
+    }
+
+    function emptyFc() {
+      return { type: 'FeatureCollection', features: [] };
+    }
+
+    function toRad(d) { return d * Math.PI / 180; }
+    function toDeg(r) { return r * 180 / Math.PI; }
+
+    function bearingBetween(lng1, lat1, lng2, lat2) {
+      const φ1 = toRad(lat1);
+      const φ2 = toRad(lat2);
+      const Δλ = toRad(lng2 - lng1);
+      const y = Math.sin(Δλ) * Math.cos(φ2);
+      const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+
+    function distMeters(lng1, lat1, lng2, lat2) {
+      const dy = (lat2 - lat1) * 111320;
+      const dx = (lng2 - lng1) * 111320 * Math.cos(toRad((lat1 + lat2) / 2));
+      return Math.hypot(dx, dy);
+    }
+
+    function bearingFromPath(path, lng, lat) {
+      if (!path || path.length < 2) return 0;
+      let best = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i];
+        const b = path[i + 1];
+        const d = distMeters(lng, lat, (a.lng + b.lng) / 2, (a.lat + b.lat) / 2);
+        if (d < bestD) {
+          bestD = d;
+          best = bearingBetween(a.lng, a.lat, b.lng, b.lat);
+        }
+      }
+      return best;
+    }
+
+    function bearingFromStations(stations, stationSeq) {
+      if (!stations?.length || stationSeq == null) return null;
+      const idx = stations.findIndex(s => String(s.seq) === String(stationSeq));
+      if (idx < 0) return null;
+      const next = stations[idx + 1] || stations[idx - 1];
+      if (!next) return null;
+      const cur = stations[idx];
+      return bearingBetween(cur.lng, cur.lat, next.lng, next.lat);
+    }
+
+    function resolveBearing(rt, bus) {
+      const s = state[rt.routeId];
+      const prev = s.prevPos[bus.plateNo];
+      if (prev && distMeters(prev.lng, prev.lat, bus.lng, bus.lat) > 8) {
+        return bearingBetween(prev.lng, prev.lat, bus.lng, bus.lat);
+      }
+      const fromSeq = bearingFromStations(s.stations, bus.stationSeq);
+      if (fromSeq != null) return fromSeq;
+      if (prev?.bearing != null) return prev.bearing;
+      return bearingFromPath(s.path?.length ? s.path : s.stations, bus.lng, bus.lat);
+    }
+
+    // 정류장 좌표는 도로 중심과 어긋날 수 있어, 공식 노선 path 위로 투영
+    function closestPointOnSegment(a, b, lng, lat) {
+      const lat0 = (a.lat + b.lat) / 2;
+      const cos = Math.cos(toRad(lat0)) || 1e-6;
+      const ax = a.lng * 111320 * cos;
+      const ay = a.lat * 111320;
+      const bx = b.lng * 111320 * cos;
+      const by = b.lat * 111320;
+      const px = lng * 111320 * cos;
+      const py = lat * 111320;
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len2 = dx * dx + dy * dy || 1;
+      let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const qx = ax + t * dx;
+      const qy = ay + t * dy;
+      return {
+        lng: qx / (111320 * cos),
+        lat: qy / 111320,
+        dist: Math.hypot(px - qx, py - qy),
+        bearing: bearingBetween(a.lng, a.lat, b.lng, b.lat),
+      };
+    }
+
+    function snapToRoutePath(path, lng, lat) {
+      if (!path || path.length < 2) return { lng, lat, bearing: null, index: 0 };
+      let best = null;
+      let bestIdx = 0;
+      for (let i = 0; i < path.length - 1; i++) {
+        const hit = closestPointOnSegment(path[i], path[i + 1], lng, lat);
+        if (!best || hit.dist < best.dist) {
+          best = hit;
+          bestIdx = i;
+        }
+      }
+      return best
+        ? { lng: best.lng, lat: best.lat, bearing: best.bearing, index: bestIdx }
+        : { lng, lat, bearing: null, index: 0 };
+    }
+
+    // stateCd: 0 교차로(사이), 1 정류장 도착, 2 정류장 출발
+    function progressFromState(stateCd) {
+      if (stateCd === 1) return 0;
+      if (stateCd === 2) return 0.22;
+      if (stateCd === 0) return 0.55;
+      return 0.35;
+    }
+
+    function nearestPathIndex(path, lng, lat) {
+      let bestI = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < path.length; i++) {
+        const d = distMeters(lng, lat, path[i].lng, path[i].lat);
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
+        }
+      }
+      return bestI;
+    }
+
+    // 현재 정류장 → 다음 정류장 구간을 따라 progress(0~1) 위치 계산
+    function positionBetweenStations(path, stations, stationSeq, progress) {
+      if (!path?.length) return null;
+      const seqNum = Number(stationSeq);
+      const cur = stations.find(s => Number(s.seq) === seqNum);
+      if (!cur) return null;
+
+      const next = stations.find(s => Number(s.seq) === seqNum + 1);
+      const t = Math.max(0, Math.min(1, progress ?? 0));
+
+      if (!next || t <= 0.001) {
+        return snapToRoutePath(path, cur.lng, cur.lat);
+      }
+
+      let i0 = nearestPathIndex(path, cur.lng, cur.lat);
+      let i1 = nearestPathIndex(path, next.lng, next.lat);
+
+      // 경로가 왕복이라 인덱스가 역전되면 보정
+      if (i1 < i0) {
+        // 가까운 앞쪽 후보 찾기
+        let alt = i0;
+        let altD = Infinity;
+        for (let i = i0; i < path.length; i++) {
+          const d = distMeters(next.lng, next.lat, path[i].lng, path[i].lat);
+          if (d < altD) {
+            altD = d;
+            alt = i;
+          }
+        }
+        if (alt > i0) i1 = alt;
+        else {
+          // 그래도 안 되면 단순 직선 보간 후 스냅
+          const lng = cur.lng + (next.lng - cur.lng) * t;
+          const lat = cur.lat + (next.lat - cur.lat) * t;
+          return snapToRoutePath(path, lng, lat);
+        }
+      }
+
+      // i0→i1 누적거리
+      const pts = path.slice(i0, i1 + 1);
+      if (pts.length < 2) {
+        const lng = cur.lng + (next.lng - cur.lng) * t;
+        const lat = cur.lat + (next.lat - cur.lat) * t;
+        return snapToRoutePath(path, lng, lat);
+      }
+
+      const segLens = [];
+      let total = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const len = distMeters(pts[i].lng, pts[i].lat, pts[i + 1].lng, pts[i + 1].lat);
+        segLens.push(len);
+        total += len;
+      }
+      if (total < 1) return snapToRoutePath(path, cur.lng, cur.lat);
+
+      let remain = total * t;
+      for (let i = 0; i < segLens.length; i++) {
+        if (remain <= segLens[i] || i === segLens.length - 1) {
+          const u = segLens[i] < 1e-6 ? 0 : remain / segLens[i];
+          const a = pts[i];
+          const b = pts[i + 1];
+          return {
+            lng: a.lng + (b.lng - a.lng) * u,
+            lat: a.lat + (b.lat - a.lat) * u,
+            bearing: bearingBetween(a.lng, a.lat, b.lng, b.lat),
+          };
+        }
+        remain -= segLens[i];
+      }
+      return snapToRoutePath(path, next.lng, next.lat);
+    }
+
+    function routeLineGeoJSON(rt) {
+      const s = state[rt.routeId];
+      const pts = (s.path && s.path.length > 1) ? s.path : s.stations;
+      if (!s.visible || pts.length < 2) return emptyFc();
+      return {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: { name: rt.name, color: rt.color },
+          geometry: {
+            type: 'LineString',
+            coordinates: pts.map(p => [p.lng, p.lat]),
+          },
+        }],
+      };
+    }
+
+    function stationGeoJSON(rt) {
+      const s = state[rt.routeId];
+      if (!s.visible || !s.showStations) return emptyFc();
+      return {
+        type: 'FeatureCollection',
+        features: (s.stations || []).map(st => ({
+          type: 'Feature',
+          properties: {
+            name: st.name || '',
+            seq: st.seq ?? '',
+            stationId: st.stationId || '',
+            routeId: rt.routeId,
+            color: rt.color,
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [st.lng, st.lat],
+          },
+        })),
+      };
+    }
+
+    function ensureBusIcon() {
+      if (!map || map.hasImage('bus-box')) return;
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.translate(size / 2, size / 2);
+
+      // 노란 직사각형 (앞쪽=위/-y)
+      ctx.fillStyle = '#ffe566';
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 3;
+      roundRectPath(ctx, -12, -22, 24, 40, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      // 검정 앞면
+      ctx.fillStyle = '#111';
+      ctx.fillRect(-12, -22, 24, 9);
+
+      // 흰 화살 (진행 방향)
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(0, -19);
+      ctx.lineTo(7, -10);
+      ctx.lineTo(-7, -10);
+      ctx.closePath();
+      ctx.fill();
+
+      map.addImage('bus-box', ctx.getImageData(0, 0, size, size), { pixelRatio: 2 });
+    }
+
+    function roundRectPath(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function busGeoJSON(rt) {
+      const s = state[rt.routeId];
+      if (!s.visible) return emptyFc();
+      return {
+        type: 'FeatureCollection',
+        features: (s.buses || []).map(b => ({
+          type: 'Feature',
+          properties: {
+            label: b.label,
+            plateNo: b.plateNo,
+            stationName: b.stationName || '',
+            bearing: b.bearing ?? 0,
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [b.lng, b.lat],
+          },
+        })),
+      };
+    }
+
+    function ensureRouteLayers(rt) {
+      const lineId = `route-line-${rt.routeId}`;
+      const busId = `buses-${rt.routeId}`;
+      const stId = `stations-${rt.routeId}`;
+      const stLabelId = `station-labels-${rt.routeId}`;
+      const lineSrc = `src-route-${rt.routeId}`;
+      const busSrc = `src-bus-${rt.routeId}`;
+      const stSrc = `src-station-${rt.routeId}`;
+
+      if (!map.getSource(lineSrc)) {
+        map.addSource(lineSrc, { type: 'geojson', data: emptyFc() });
+        map.addLayer({
+          id: lineId,
+          type: 'line',
+          source: lineSrc,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': rt.color,
+            'line-width': 4,
+            'line-opacity': 0.55,
+            'line-blur': 0.35,
+          },
+        });
+      }
+
+      if (!map.getSource(stSrc)) {
+        map.addSource(stSrc, { type: 'geojson', data: emptyFc() });
+        map.addLayer({
+          id: stId,
+          type: 'circle',
+          source: stSrc,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5, 16, 7],
+            'circle-color': '#ffffff',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': rt.color,
+            'circle-pitch-alignment': 'map',
+          },
+        });
+        map.addLayer({
+          id: stLabelId,
+          type: 'symbol',
+          source: stSrc,
+          minzoom: 12.5,
+          layout: {
+            'text-field': ['get', 'name'],
+            'text-size': 11,
+            'text-offset': [0, 1.2],
+            'text-anchor': 'top',
+            'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+            'text-optional': true,
+          },
+          paint: {
+            'text-color': '#d7dde5',
+            'text-halo-color': '#0b0f14',
+            'text-halo-width': 1.2,
+          },
+        });
+
+        map.on('click', stId, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const p = f.properties || {};
+          openStationPopup(
+            f.geometry.coordinates,
+            p.name || '정류장',
+            p.stationId || ''
+          ).catch(console.warn);
+        });
+        map.on('mouseenter', stId, () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', stId, () => { map.getCanvas().style.cursor = ''; });
+      }
+
+      if (!map.getSource(busSrc)) {
+        ensureBusIcon();
+        map.addSource(busSrc, { type: 'geojson', data: emptyFc() });
+        map.addLayer({
+          id: busId,
+          type: 'symbol',
+          source: busSrc,
+          layout: {
+            'icon-image': 'bus-box',
+            'icon-size': [
+              'interpolate', ['linear'], ['zoom'],
+              10, 0.55,
+              13, 0.85,
+              16, 1.15,
+            ],
+            'icon-rotate': ['get', 'bearing'],
+            'icon-rotation-alignment': 'map',
+            'icon-pitch-alignment': 'map',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'text-field': ['get', 'label'],
+            'text-size': 11,
+            'text-offset': [0, -2.2],
+            'text-anchor': 'bottom',
+            'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+            'text-allow-overlap': true,
+            'text-optional': true,
+            'text-rotation-alignment': 'viewport',
+            'text-pitch-alignment': 'viewport',
+          },
+          paint: {
+            'text-color': '#ffe566',
+            'text-halo-color': '#0b0f14',
+            'text-halo-width': 1.4,
+          },
+        });
+
+        map.on('click', busId, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const p = f.properties || {};
+          new mapboxgl.Popup({ offset: 16 })
+            .setLngLat(f.geometry.coordinates)
+            .setHTML(`<strong>${p.label || ''}</strong><br/>${p.stationName || p.plateNo || ''}`)
+            .addTo(map);
+        });
+        map.on('mouseenter', busId, () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', busId, () => { map.getCanvas().style.cursor = ''; });
+      }
+    }
+
+    function setLayerVisibility(routeId, visible) {
+      const vis = visible ? 'visible' : 'none';
+      [
+        `route-line-${routeId}`,
+        `stations-${routeId}`,
+        `station-labels-${routeId}`,
+        `buses-${routeId}`,
+      ].forEach(id => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+      });
+    }
+
+    function syncLayers() {
+      ROUTES.forEach(rt => {
+        ensureRouteLayers(rt);
+        map.getSource(`src-route-${rt.routeId}`).setData(routeLineGeoJSON(rt));
+        map.getSource(`src-station-${rt.routeId}`).setData(stationGeoJSON(rt));
+        map.getSource(`src-bus-${rt.routeId}`).setData(busGeoJSON(rt));
+        setLayerVisibility(rt.routeId, state[rt.routeId].visible);
+      });
+    }
+
+    function add3dBuildings() {
+      if (map.getLayer('3d-buildings')) return;
+      const layers = map.getStyle().layers || [];
+      const labelLayerId = layers.find(
+        l => l.type === 'symbol' && l.layout && l.layout['text-field']
+      )?.id;
+
+      map.addLayer({
+        id: '3d-buildings',
+        source: 'composite',
+        'source-layer': 'building',
+        filter: ['==', 'extrude', 'true'],
+        type: 'fill-extrusion',
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': '#1c2430',
+          'fill-extrusion-height': [
+            'interpolate', ['linear'], ['zoom'],
+            14, 0,
+            14.5, ['get', 'height'],
+          ],
+          'fill-extrusion-base': ['get', 'min_height'],
+          'fill-extrusion-opacity': 0.72,
+        },
+      }, labelLayerId);
+    }
+
+    async function loadRoute(rt, pathMode = 'official') {
+      const r = await fetch(`/api/route?routeId=${rt.routeId}&pathMode=${encodeURIComponent(pathMode)}`);
+      const data = await r.json();
+      state[rt.routeId].stations = data.stations || [];
+      state[rt.routeId].path = data.path || data.stations || [];
+    }
+
+    async function reloadPaths() {
+      statusEl.textContent = '경로 다시 그리는 중…';
+      await Promise.all(ROUTES.map(rt => loadRoute(rt, 'official')));
+      syncLayers();
+      statusEl.textContent = '경로 갱신됨';
+    }
+
+    async function loadBuses(rt) {
+      const r = await fetch(`/api/bus?routeId=${rt.routeId}`);
+      const data = await r.json();
+      const cntEl = document.getElementById(`cnt-${rt.routeId}`);
+      if (cntEl) cntEl.textContent = `${data.count ?? 0}대`;
+
+      if (data.rateLimited || data.authError || data.error) {
+        return {
+          count: 0,
+          apiError: data.error
+            || data.authError?.returnAuthMsg
+            || data.authError?.errMsg
+            || 'API 오류',
+          rateLimited: !!data.rateLimited,
+        };
+      }
+
+      const s = state[rt.routeId];
+      const routePath = (s.path && s.path.length > 1) ? s.path : s.stations;
+      const nextPrev = {};
+      s.buses = (data.buses || []).map(b => {
+        const progress = b.hasGps ? null : progressFromState(b.stateCd);
+        let pos;
+        if (b.hasGps) {
+          pos = snapToRoutePath(routePath, b.lng, b.lat);
+        } else {
+          pos = positionBetweenStations(routePath, s.stations, b.stationSeq, progress)
+            || snapToRoutePath(routePath, b.lng, b.lat);
+        }
+
+        const bus = {
+          plateNo: b.plateNo,
+          lat: pos.lat,
+          lng: pos.lng,
+          stationSeq: b.stationSeq,
+          stationName: b.stationName || '',
+          stateCd: b.stateCd,
+          label: b.remainSeat >= 0 ? `${rt.name} ${b.remainSeat}석` : rt.name,
+          bearing: pos.bearing != null
+            ? pos.bearing
+            : resolveBearing(rt, { plateNo: b.plateNo, lng: pos.lng, lat: pos.lat, stationSeq: b.stationSeq }),
+        };
+        nextPrev[bus.plateNo] = { lng: bus.lng, lat: bus.lat, bearing: bus.bearing, stationSeq: bus.stationSeq };
+        return bus;
+      });
+      s.prevPos = nextPrev;
+      return { count: data.count ?? 0 };
+    }
+
+    let refreshing = false;
+
+    async function tick(manual = false) {
+      if (refreshing) return;
+      refreshing = true;
+      const refreshBtn = document.getElementById('refreshBtn');
+      if (refreshBtn) refreshBtn.disabled = true;
+      if (manual) statusEl.textContent = '위치 새로고침 중…';
+
+      try {
+        const results = await Promise.all(ROUTES.map(loadBuses));
+        const total = results.reduce((a, b) => a + (b.count || 0), 0);
+        const apiErr = results.find(r => r.apiError);
+        const stamp = new Date().toLocaleTimeString('ko-KR');
+        if (apiErr) {
+          statusEl.textContent = apiErr.rateLimited
+            ? `API 일일 한도 초과 · ${stamp}`
+            : `${apiErr.apiError} · ${stamp}`;
+        } else {
+          statusEl.textContent = manual
+            ? `운행 ${total}대 · ${stamp} 수동 갱신`
+            : `운행 ${total}대 · ${stamp} 갱신`;
+        }
+        syncLayers();
+        refreshFavoriteArrivals().catch(console.warn);
+
+        if (!didFit) {
+          if (favorites.home?.lng != null) {
+            didFit = true;
+            focusFavorite('home');
+          } else if (favorites.work?.lng != null) {
+            didFit = true;
+            focusFavorite('work');
+          } else if (total > 0) {
+            didFit = true;
+            const first = ROUTES.flatMap(rt => state[rt.routeId].buses)[0];
+            if (first) {
+              map.flyTo({
+                center: [first.lng, first.lat],
+                zoom: 12.5,
+                pitch: 55,
+                bearing: -18,
+                duration: 1800,
+              });
+            }
+          }
+        }
+      } finally {
+        refreshing = false;
+        if (refreshBtn) refreshBtn.disabled = false;
+      }
+    }
+
+    const DEFAULT_3D_VIEW = { pitch: 55, bearing: -20 };
+    let last3dView = { ...DEFAULT_3D_VIEW };
+
+    function wireCompassToggle() {
+      const compass = map.getContainer().querySelector('.mapboxgl-ctrl-compass');
+      if (!compass) return;
+
+      map.on('pitchend', () => {
+        const pitch = map.getPitch();
+        if (pitch > 5) {
+          last3dView = { pitch, bearing: map.getBearing() };
+        }
+      });
+      map.on('rotateend', () => {
+        if (map.getPitch() > 5) {
+          last3dView = { pitch: map.getPitch(), bearing: map.getBearing() };
+        }
+      });
+
+      compass.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        const pitch = map.getPitch();
+        if (pitch > 5) {
+          last3dView = { pitch, bearing: map.getBearing() };
+          map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
+        } else {
+          map.easeTo({
+            pitch: last3dView.pitch || DEFAULT_3D_VIEW.pitch,
+            bearing: last3dView.bearing ?? DEFAULT_3D_VIEW.bearing,
+            duration: 700,
+          });
+        }
+      }, true);
+    }
+
+    async function init() {
+      statusEl.textContent = '지도 준비 중…';
+      const cfgRes = await fetch('/api/config');
+      const cfg = await cfgRes.json().catch(() => ({}));
+      if (!cfgRes.ok || !cfg.mapboxToken) {
+        showError(
+          'Mapbox 토큰 필요',
+          cfg.hint || cfg.error || 'Vercel에 MAPBOX_TOKEN(pk.)을 추가한 뒤 Redeploy 하세요.'
+        );
+        return;
+      }
+
+      mapboxgl.accessToken = cfg.mapboxToken;
+      map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/dark-v11',
+        center: [127.0, 37.5],
+        zoom: 10.8,
+        pitch: 55,
+        bearing: -20,
+        antialias: true,
+      });
+      map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+      wireCompassToggle();
+
+      await new Promise((resolve) => {
+        map.once('load', resolve);
+      });
+
+      try { add3dBuildings(); } catch (e) { console.warn(e); }
+      ensureBusIcon();
+      syncFavoriteMarkers();
+      refreshFavoriteArrivals().catch(console.warn);
+
+      document.getElementById('showStations').addEventListener('change', (e) => {
+        saveSettings();
+        ROUTES.forEach(rt => {
+          ensureState(rt);
+          state[rt.routeId].showStations = e.target.checked;
+        });
+        syncLayers();
+      });
+      document.getElementById('routeSearchBtn').addEventListener('click', () => {
+        searchRoutes().catch(console.warn);
+      });
+      routeQueryEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          searchRoutes().catch(console.warn);
+        }
+      });
+      document.getElementById('refreshBtn').addEventListener('click', () => {
+        tick(true).catch(console.warn);
+      });
+
+      statusEl.textContent = '노선 불러오는 중…';
+      await Promise.all(ROUTES.map(rt => loadRoute(rt, 'official')));
+      syncLayers();
+
+      statusEl.textContent = '버스 위치 불러오는 중…';
+      await tick();
+      setInterval(() => { tick().catch(console.warn); }, REFRESH_MS);
+    }
+
+    init().catch(err => {
+      if (!errorEl.classList.contains('show')) {
+        showError('지도를 불러오지 못했습니다', String(err?.message || err));
+      }
+    });
+  </script>
+</body>
+</html>
