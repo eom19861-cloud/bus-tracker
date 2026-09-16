@@ -150,6 +150,7 @@
         color: #f2f4f7;
         font-family: "IBM Plex Sans KR", sans-serif;
         padding-top: env(safe-area-inset-top);
+        overflow-x: hidden;
       }
       #past-tt.open { display: flex; flex-direction: column; }
       #past-tt .tt-body {
@@ -238,13 +239,13 @@
       }
       #past-tt .tt-dows {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        margin: 12px 8px 0;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        margin: 12px 4px 0;
         border-bottom: 1px solid rgba(255,255,255,0.08);
       }
       #past-tt .tt-dows button {
         border: 0; background: transparent; color: #8b93a0;
-        padding: 10px 0 12px; font: inherit; font-size: 14px; cursor: pointer;
+        padding: 10px 0 12px; font: inherit; font-size: 13px; cursor: pointer;
         position: relative;
       }
       #past-tt .tt-dows button.on { color: #f2f4f7; font-weight: 600; }
@@ -279,10 +280,11 @@
         font-weight: 700;
       }
       #past-tt .tt-note {
-        margin: 0 18px 8px;
+        margin: 8px 18px 16px;
         color: #8b93a0;
         font-size: 11px;
         line-height: 1.45;
+        flex: none;
       }
       #past-tt .tt-grid {
         flex: 1;
@@ -485,7 +487,6 @@
           ? hours.map((h) => `<button type="button" data-hour="${h}" class="${h === state.hour ? 'on' : ''}">${h}시</button>`).join('')
           : '<div class="tt-status">운행 시각이 없습니다.</div>'}
       </div>
-      <p class="tt-note">${escapeHtml(p?.note || '')}${day.error ? ` ${escapeHtml(day.error)}` : ''}</p>
       <div class="tt-grid">
         ${columns.map((col) => `
           <div class="tt-col">
@@ -501,12 +502,16 @@
           </div>
         `).join('')}
       </div>
+      <p class="tt-note">${escapeHtml(p?.note || '')}${day.error ? ` ${escapeHtml(day.error)}` : ''}</p>
     `;
 
     root.classList.add('open');
     document.body.style.overflow = 'hidden';
-    const onHour = root.querySelector('.tt-hours button.on');
-    if (onHour) onHour.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' });
+    const hoursRow = root.querySelector('.tt-hours');
+    const onHour = hoursRow?.querySelector('button.on');
+    if (hoursRow && onHour) {
+      hoursRow.scrollLeft = Math.max(0, onHour.offsetLeft - (hoursRow.clientWidth / 2) + (onHour.offsetWidth / 2));
+    }
   }
 
   async function load() {
