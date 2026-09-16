@@ -2,5 +2,9 @@
   "name": "bus-tracker",
   "version": "1.0.0",
   "private": true,
-  "description": "광역버스 실시간 위치 지도"
+  "description": "광역버스 실시간 위치 지도",
+  "type": "module",
+  "scripts": {
+    "test": "node --test lib/timetable.test.mjs"
+  }
 }

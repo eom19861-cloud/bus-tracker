@@ -685,6 +685,7 @@
   </div>
 
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+  <script src="past-timetable.js"></script>
   <script>
     const STORAGE_KEY = 'bus-tracker-routes-v2';
     const SETTINGS_KEY = 'bus-tracker-settings-v1';
@@ -1475,6 +1476,15 @@
       const role = sid ? favoriteRoleForStation(sid) : null;
       const lat = meta.lat != null ? Number(meta.lat) : '';
       const lng = meta.lng != null ? Number(meta.lng) : '';
+      const prefer = ROUTES.map(r => r.routeId).filter(Boolean).join(',');
+      const routeId = meta.routeId ? String(meta.routeId) : '';
+      const timetableBtn = sid ? `
+        <button type="button" class="popup-timetable-btn"
+          data-open-timetable
+          data-station-id="${escapeHtml(sid)}"
+          data-station-name="${escapeHtml(stationName || '정류장')}"
+          data-route-id="${escapeHtml(routeId)}"
+          data-prefer-route-ids="${escapeHtml(prefer)}">과거 시간표</button>` : '';
       const actions = sid ? `
         <div class="popup-fav-actions">
           <button type="button" class="${role === 'home' ? 'active' : ''}"
@@ -1491,7 +1501,7 @@
             data-lng="${lng}">${role === 'work' ? '회사 해제' : '회사로'}</button>
         </div>` : '';
 
-      return `${title}${body}${actions}`;
+      return `${title}${body}${timetableBtn}${actions}`;
     }
 
     async function fetchStationArrivals(stationId) {
@@ -1515,14 +1525,15 @@
         ...a,
         routeName: nameById[a.routeId] || a.routeName,
       }));
+      if (window.PastTimetable) window.PastTimetable.recordArrivals(stationId, arrivals);
       return { arrivals };
     }
 
-    async function openStationPopup(lngLat, stationName, stationId) {
+    async function openStationPopup(lngLat, stationName, stationId, routeId) {
       document.querySelectorAll('.mapboxgl-popup').forEach(el => el.remove());
       const lng = Array.isArray(lngLat) ? lngLat[0] : lngLat.lng;
       const lat = Array.isArray(lngLat) ? lngLat[1] : lngLat.lat;
-      const metaBase = { stationId, lat, lng };
+      const metaBase = { stationId, lat, lng, routeId };
       const popup = new mapboxgl.Popup({ offset: 12, maxWidth: '280px' })
         .setLngLat(lngLat)
         .setHTML(arrivalPopupHtml(stationName, [], { loading: true, ...metaBase }))
@@ -1936,7 +1947,8 @@
           openStationPopup(
             f.geometry.coordinates,
             p.name || '정류장',
-            p.stationId || ''
+            p.stationId || '',
+            rt.routeId
           ).catch(console.warn);
         });
         map.on('mouseenter', stId, () => { map.getCanvas().style.cursor = 'pointer'; });
