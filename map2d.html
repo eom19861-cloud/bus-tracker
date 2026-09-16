@@ -637,6 +637,7 @@
   <div id="hint">드래그 · 스크롤로 이동 · <a href="/">3D로 전환</a></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="past-timetable.js"></script>
   <script>
     const STORAGE_KEY = 'bus-tracker-routes-v2';
     const SETTINGS_KEY = 'bus-tracker-settings-v1';
@@ -1381,6 +1382,15 @@
       const role = sid ? favoriteRoleForStation(sid) : null;
       const lat = meta.lat != null ? Number(meta.lat) : '';
       const lng = meta.lng != null ? Number(meta.lng) : '';
+      const prefer = ROUTES.map(r => r.routeId).filter(Boolean).join(',');
+      const routeId = meta.routeId ? String(meta.routeId) : '';
+      const timetableBtn = sid ? `
+        <button type="button" class="popup-timetable-btn"
+          data-open-timetable
+          data-station-id="${escapeHtml(sid)}"
+          data-station-name="${escapeHtml(stationName || '정류장')}"
+          data-route-id="${escapeHtml(routeId)}"
+          data-prefer-route-ids="${escapeHtml(prefer)}">과거 시간표</button>` : '';
       const actions = sid ? `
         <div class="popup-fav-actions">
           <button type="button" class="${role === 'home' ? 'active' : ''}"
@@ -1396,7 +1406,7 @@
             data-lat="${lat}"
             data-lng="${lng}">${role === 'work' ? '회사 해제' : '회사로'}</button>
         </div>` : '';
-      return `${title}${body}${actions}`;
+      return `${title}${body}${timetableBtn}${actions}`;
     }
 
     async function fetchStationArrivals(stationId) {
@@ -1419,6 +1429,7 @@
         ...a,
         routeName: nameById[a.routeId] || a.routeName,
       }));
+      if (window.PastTimetable) window.PastTimetable.recordArrivals(stationId, arrivals);
       return { arrivals };
     }
 
@@ -1451,7 +1462,7 @@
             fillColor: '#fff',
             fillOpacity: 1,
           });
-          const metaBase = { stationId: st.stationId || '', lat: st.lat, lng: st.lng };
+          const metaBase = { stationId: st.stationId || '', lat: st.lat, lng: st.lng, routeId: rt.routeId };
           m.bindPopup(arrivalPopupHtml(st.name || '정류장', [], { loading: true, ...metaBase }), {
             maxWidth: 280,
           });
