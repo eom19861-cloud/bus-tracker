@@ -112,6 +112,31 @@
       .sort((a, b) => a.min - b.min);
   }
 
+  async function pullServerHistory(stationId, routeId) {
+    if (!stationId || !routeId) return;
+    try {
+      const r = await fetch(
+        `/api/history?stationId=${encodeURIComponent(stationId)}&routeId=${encodeURIComponent(routeId)}`
+      );
+      if (!r.ok) return;
+      const data = await r.json();
+      const store = loadStore();
+      const key = storeKey(stationId, routeId);
+      const list = Array.isArray(store[key]) ? store[key] : [];
+      const cutoff = Date.now() - 80 * 86400000;
+      for (const raw of data.arrivals || []) {
+        const t = Number(raw);
+        if (!Number.isFinite(t) || t < cutoff) continue;
+        if (list.some((item) => Math.abs(item.t - t) < 2 * 60 * 1000)) continue;
+        list.push({ t, seats: null });
+      }
+      store[key] = list.sort((a, b) => a.t - b.t).slice(-400);
+      saveStore(store);
+    } catch {
+      /* offline / not deployed */
+    }
+  }
+
   function timesFromHour(times, hour) {
     const start = hour * 60;
     const end = start + 120;
@@ -534,6 +559,7 @@
     }
     state.payload = data;
     state.routeId = data.selectedRouteId || state.routeId;
+    await pullServerHistory(state.stationId, state.routeId);
     const now = kstParts();
     state.dow = now.dow;
     state.hour = now.hour;

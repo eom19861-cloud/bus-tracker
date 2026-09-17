@@ -6,5 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test lib/timetable.test.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
   }
 }

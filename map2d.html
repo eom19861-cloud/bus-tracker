@@ -951,6 +951,24 @@
       localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
     }
 
+    async function syncWatchlist() {
+      try {
+        const stations = [];
+        if (favorites.home?.stationId) stations.push({ ...favorites.home, role: 'home' });
+        if (favorites.work?.stationId) stations.push({ ...favorites.work, role: 'work' });
+        await fetch('/api/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stations,
+            routeIds: ROUTES.map((r) => r.routeId),
+          }),
+        });
+      } catch (err) {
+        console.warn('watchlist sync', err);
+      }
+    }
+
     function favoriteRoleForStation(stationId) {
       if (!stationId) return null;
       if (favorites.home?.stationId === String(stationId)) return 'home';
@@ -973,6 +991,7 @@
       renderFavorites();
       refreshFavoriteArrivals().catch(console.warn);
       syncFavoriteMarkers();
+      syncWatchlist().catch(console.warn);
       statusEl.textContent = `${FAV_LABELS[role]} 정류장 저장: ${next.name}`;
     }
 
@@ -983,6 +1002,7 @@
       saveFavorites();
       renderFavorites();
       syncFavoriteMarkers();
+      syncWatchlist().catch(console.warn);
       statusEl.textContent = `${FAV_LABELS[role]} 정류장 해제: ${name}`;
     }
 
@@ -1094,6 +1114,7 @@
 
     function saveRoutes() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(ROUTES));
+      syncWatchlist().catch(console.warn);
     }
 
     function loadSettings() {
@@ -1726,6 +1747,7 @@
     wireAlertSettings();
     wireCommuteMode();
     refreshFavoriteArrivals().catch(console.warn);
+    syncWatchlist().catch(console.warn);
 
     showStationsEl.addEventListener('change', () => {
       saveSettings();
