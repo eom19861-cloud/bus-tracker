@@ -102,6 +102,7 @@ export function recordArrival(store, {
   routeName,
   stationName,
   atMs,
+  replaceWindowMs = 8 * 60 * 1000,
 }) {
   if (!stationId || !routeId) return store;
   const key = historyKey(stationId, routeId);
@@ -115,9 +116,10 @@ export function recordArrival(store, {
   entry.routeName = routeName || entry.routeName;
   entry.stationName = stationName || entry.stationName;
   const t = Number(atMs) || Date.now();
-  if (!entry.arrivals.some((x) => Math.abs(Number(x) - t) < 120000)) {
-    entry.arrivals.push(t);
-  }
+  // 같은 버스의 예상 도착은 더 가까운 관측으로 시각만 갱신한다.
+  const near = entry.arrivals.findIndex((x) => Math.abs(Number(x) - t) < replaceWindowMs);
+  if (near >= 0) entry.arrivals[near] = t;
+  else entry.arrivals.push(t);
   const cutoff = Date.now() - HISTORY_KEEP_MS;
   entry.arrivals = entry.arrivals
     .map(Number)

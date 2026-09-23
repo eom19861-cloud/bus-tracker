@@ -21,57 +21,49 @@ function authorized(req) {
   return false;
 }
 
+// 5분보다 긴 간격으로 조회해도 놓치지 않도록, 20분 안 버스는 바로 기록한다.
+const CAPTURE_SEC = 20 * 60;
+
 function observe(stationId, stationName, arrivals, approach, history) {
   const now = Date.now();
-  const seen = new Set();
 
   for (const a of arrivals || []) {
+    if (a.flag === 'STOP') continue;
     const candidates = [
       { plate: a.plateNo1, eta: a.etaSec1 },
       { plate: a.plateNo2, eta: a.etaSec2 },
     ];
     for (const c of candidates) {
-      if (!c.plate || c.eta == null || !Number.isFinite(c.eta) || c.eta > 180) continue;
+      if (!c.plate || c.eta == null || !Number.isFinite(c.eta) || c.eta < 0 || c.eta > CAPTURE_SEC) continue;
       const key = `${stationId}|${a.routeId}|${c.plate}`;
-      seen.add(key);
       const prev = approach[key];
-      if (!prev) {
-        approach[key] = {
-          stationId: String(stationId),
-          routeId: String(a.routeId),
-          routeName: a.routeName || a.routeId,
-          stationName: stationName || '',
-          plate: c.plate,
-          minEta: c.eta,
-          lastTs: now,
-        };
-      } else {
-        prev.minEta = Math.min(prev.minEta, c.eta);
-        prev.lastTs = now;
-        prev.routeName = a.routeName || prev.routeName;
-        prev.stationName = stationName || prev.stationName;
-      }
-    }
-  }
-
-  for (const [key, prev] of Object.entries(approach)) {
-    if (!key.startsWith(`${stationId}|`)) continue;
-    if (seen.has(key)) continue;
-    if (prev.minEta <= 150) {
-      const arrivedAt = prev.lastTs + Math.min(prev.minEta, 45) * 1000;
+      // 더 가까워진 관측이 더 정확하다. 이미 90초 안으로 잠긴 시각은 유지한다.
+      const closer = !prev || (!prev.locked && c.eta <= prev.eta + 30);
+      const eta = closer ? c.eta : prev.eta;
+      const arriveAt = closer ? now + Math.round(c.eta) * 1000 : prev.arriveAt;
+      approach[key] = {
+        stationId: String(stationId),
+        routeId: String(a.routeId),
+        routeName: a.routeName || prev?.routeName || a.routeId,
+        stationName: stationName || prev?.stationName || '',
+        plate: c.plate,
+        eta,
+        arriveAt,
+        lastTs: now,
+        locked: Boolean(prev?.locked) || c.eta <= 90,
+      };
       recordArrival(history, {
-        stationId: prev.stationId,
-        routeId: prev.routeId,
-        routeName: prev.routeName,
-        stationName: prev.stationName,
-        atMs: arrivedAt,
+        stationId: String(stationId),
+        routeId: String(a.routeId),
+        routeName: approach[key].routeName,
+        stationName: approach[key].stationName,
+        atMs: arriveAt,
       });
     }
-    delete approach[key];
   }
 
   for (const [key, prev] of Object.entries(approach)) {
-    if (now - prev.lastTs > 12 * 60 * 1000) delete approach[key];
+    if (now - prev.lastTs > 40 * 60 * 1000) delete approach[key];
   }
 }
 
