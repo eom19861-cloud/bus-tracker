@@ -1,13 +1,11 @@
+// 즐겨찾기 정류장의 버스 도착을 주기적으로 관측해 Blob(state.json)에 쌓는다.
+//
+// Blob 사용량 원칙 (Hobby: Advanced Operations 월 2,000건)
+// - 호출 1회당 get 1회(state.json), put 은 "새 도착이 생겼을 때"만 1회.
+// - 예전에는 매 호출마다 approach·history 를 각각 put 해서 하루 수천 건을 썼다(90초 주기 × 2회 put).
+//   지금은 GitHub Action 이 30분 간격으로 호출하고, 저장은 변화가 있을 때만 일어난다.
 import { fetchStationArrivalsServer } from './_lib/gyeonggi.js';
-import {
-  getWatchlist,
-  getHistoryStore,
-  setHistoryStore,
-  getApproachStore,
-  setApproachStore,
-  recordArrival,
-  storeReady,
-} from './_lib/store.js';
+import { getState, saveState, recordArrival, storeReady } from './_lib/store.js';
 
 function authorized(req) {
   const secret = (process.env.CRON_SECRET || '').trim();
@@ -21,11 +19,19 @@ function authorized(req) {
   return false;
 }
 
-// 5분보다 긴 간격으로 조회해도 놓치지 않도록, 20분 안 버스는 바로 기록한다.
+// 30분 간격 조회에서도 버스를 놓치지 않도록, 20분 안 버스는 바로 기록한다.
 const CAPTURE_SEC = 20 * 60;
+// 이 시간보다 오래된 approach 항목은 지운다.
+const APPROACH_KEEP_MS = 40 * 60 * 1000;
 
+/**
+ * 도착 정보를 관측해 approach(진행 중인 버스)와 history(도착 기록)에 반영한다.
+ * @returns {{changed: boolean, recorded: number}}
+ */
 function observe(stationId, stationName, arrivals, approach, history) {
   const now = Date.now();
+  let changed = false;
+  let recorded = 0;
 
   for (const a of arrivals || []) {
     if (a.flag === 'STOP') continue;
@@ -41,6 +47,9 @@ function observe(stationId, stationName, arrivals, approach, history) {
       const closer = !prev || (!prev.locked && c.eta <= prev.eta + 30);
       const eta = closer ? c.eta : prev.eta;
       const arriveAt = closer ? now + Math.round(c.eta) * 1000 : prev.arriveAt;
+      const locked = Boolean(prev?.locked) || c.eta <= 90;
+      if (!prev) changed = true;
+      else if (!prev.locked && locked) changed = true;
       approach[key] = {
         stationId: String(stationId),
         routeId: String(a.routeId),
@@ -50,21 +59,30 @@ function observe(stationId, stationName, arrivals, approach, history) {
         eta,
         arriveAt,
         lastTs: now,
-        locked: Boolean(prev?.locked) || c.eta <= 90,
+        locked,
       };
-      recordArrival(history, {
+      const added = recordArrival(history, {
         stationId: String(stationId),
         routeId: String(a.routeId),
         routeName: approach[key].routeName,
         stationName: approach[key].stationName,
         atMs: arriveAt,
       });
+      if (added) {
+        changed = true;
+        recorded += 1;
+      }
     }
   }
 
   for (const [key, prev] of Object.entries(approach)) {
-    if (now - prev.lastTs > 40 * 60 * 1000) delete approach[key];
+    if (now - prev.lastTs > APPROACH_KEEP_MS) {
+      delete approach[key];
+      changed = true;
+    }
   }
+
+  return { changed, recorded };
 }
 
 export default async function handler(req, res) {
@@ -81,21 +99,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const watchlist = await getWatchlist();
-    const stations = Array.isArray(watchlist.stations) ? watchlist.stations : [];
-    const routeIdSet = new Set((watchlist.routeIds || []).map(String).filter(Boolean));
+    const state = await getState();
+    const stations = Array.isArray(state.watchlist?.stations) ? state.watchlist.stations : [];
+    const routeIdSet = new Set((state.watchlist?.routeIds || []).map(String).filter(Boolean));
 
     if (!stations.length) {
       return res.status(200).json({
         ok: true,
         skipped: true,
-        reason: 'watchlist empty — 집/회사 즐겨찾기를 앱에서 한 번 저장하세요.',
+        reason: 'watchlist empty — 앱에서 집/회사 즐겨찾기를 한 번 저장하면 수집이 시작됩니다.',
+        at: new Date().toISOString(),
       });
     }
 
-    const approach = await getApproachStore();
-    const history = await getHistoryStore();
+    const approach = state.approach || {};
+    const history = state.history || {};
     const results = [];
+    let changed = false;
+    let recorded = 0;
 
     for (const st of stations) {
       const { arrivals, error, rateLimited } = await fetchStationArrivalsServer(
@@ -107,18 +128,25 @@ export default async function handler(req, res) {
         if (rateLimited) break;
         continue;
       }
-      observe(st.stationId, st.name, arrivals, approach, history);
-      results.push({ stationId: st.stationId, arrivals: arrivals.length });
+      const outcome = observe(String(st.stationId), st.name, arrivals, approach, history);
+      if (outcome.changed) changed = true;
+      recorded += outcome.recorded;
+      results.push({ stationId: st.stationId, arrivals: arrivals.length, recorded: outcome.recorded });
     }
 
-    await setApproachStore(approach);
-    await setHistoryStore(history);
+    state.approach = approach;
+    state.history = history;
+    const save = await saveState(state, { changed, auto: true });
 
     return res.status(200).json({
       ok: true,
       stations: results,
+      recorded,
       historyKeys: Object.keys(history).length,
       approachKeys: Object.keys(approach).length,
+      wrote: save.written,
+      putReason: save.written ? undefined : save.reason,
+      puts: save.count,
       at: new Date().toISOString(),
     });
   } catch (err) {

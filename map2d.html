@@ -360,19 +360,23 @@
       border: 1px solid var(--line);
       border-radius: 12px;
       background: rgba(255,255,255,0.03);
-      padding: 10px 12px;
+      padding: 8px 10px;
       cursor: pointer;
       text-align: left;
       color: inherit;
       font: inherit;
       width: 100%;
+      max-width: 100%;
+      overflow: hidden;
     }
     .fav-card:hover { background: rgba(255,255,255,0.07); }
     .fav-card-top {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
+      gap: 6px;
+      margin-bottom: 0;
+      min-width: 0;
+      max-width: 100%;
     }
     .fav-badge {
       flex: none;
@@ -408,11 +412,36 @@
       line-height: 1;
     }
     .fav-remove:hover { color: #ff8a80; }
+    .fav-eta {
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 46%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffe566;
+    }
+    .fav-fold {
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12px;
+      line-height: 1;
+      padding: 2px;
+      cursor: pointer;
+    }
+    .fav-card.open .fav-fold { transform: rotate(180deg); }
     .fav-arrivals {
-      display: grid;
+      display: none;
       gap: 4px;
+      margin-top: 8px;
       font-size: 12px;
     }
+    .fav-card.open .fav-arrivals { display: grid; }
     .fav-arrival-row {
       display: flex;
       justify-content: space-between;
@@ -493,6 +522,17 @@
       font-size: 11px;
       color: var(--muted);
       line-height: 1.35;
+    }
+    @media (max-width: 720px) {
+      #panel {
+        top: 8px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+        padding: 12px 10px;
+      }
+      .commute-label { display: none; }
+      .commute-bar { margin-bottom: 8px; }
     }
     #commuteBoard {
       display: none;
@@ -951,17 +991,56 @@
       localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
     }
 
-    async function syncWatchlist() {
+    // 서버 watchlist 를 읽어 로컬 즐겨찾기를 복원한다. (쓰기 없음)
+    // localStorage 가 비어 있는 상태로 페이지가 열려도 서버 즐겨찾기를 지우지 않는다.
+    async function loadWatchlistFromServer() {
+      try {
+        const r = await fetch('/api/watchlist', { cache: 'no-store' });
+        if (!r.ok) return;
+        const data = await r.json();
+        const stations = Array.isArray(data?.stations) ? data.stations : [];
+        const hasLocal = !!(favorites.home || favorites.work);
+        if (!hasLocal && stations.length) {
+          for (const st of stations) {
+            const role = st?.role === 'home' ? 'home' : (st?.role === 'work' ? 'work' : null);
+            if (!role || favorites[role] || !st?.stationId) continue;
+            favorites[role] = {
+              stationId: String(st.stationId),
+              name: String(st.name || '정류장'),
+              lat: st.lat != null && Number.isFinite(Number(st.lat)) ? Number(st.lat) : null,
+              lng: st.lng != null && Number.isFinite(Number(st.lng)) ? Number(st.lng) : null,
+            };
+          }
+          if (favorites.home || favorites.work) {
+            saveFavorites();
+            renderFavorites();
+            syncFavoriteMarkers();
+            refreshFavoriteArrivals().catch(console.warn);
+            return;
+          }
+        }
+        // 로컬에는 있는데 서버가 비어 있으면 한 번 복구 저장한다.
+        if (!stations.length && hasLocal) await syncWatchlist();
+      } catch (err) {
+        console.warn('watchlist load', err);
+      }
+    }
+
+    async function syncWatchlist({ allowEmpty = false } = {}) {
       try {
         const stations = [];
         if (favorites.home?.stationId) stations.push({ ...favorites.home, role: 'home' });
         if (favorites.work?.stationId) stations.push({ ...favorites.work, role: 'work' });
+        // 빈 목록으로 서버 즐겨찾기를 덮어쓰지 않는다(예전 버그).
+        // 즐겨찾기를 마지막 하나까지 지운 경우에만 allowEmpty 로 서버도 비운다.
+        if (!stations.length && !allowEmpty) return;
         await fetch('/api/watchlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             stations,
             routeIds: ROUTES.map((r) => r.routeId),
+            force: allowEmpty,
           }),
         });
       } catch (err) {
@@ -1002,7 +1081,7 @@
       saveFavorites();
       renderFavorites();
       syncFavoriteMarkers();
-      syncWatchlist().catch(console.warn);
+      syncWatchlist({ allowEmpty: !favorites.home && !favorites.work }).catch(console.warn);
       statusEl.textContent = `${FAV_LABELS[role]} 정류장 해제: ${name}`;
     }
 
@@ -1019,13 +1098,21 @@
           <div class="fav-card-top">
             <span class="fav-badge ${role}">${FAV_LABELS[role]}</span>
             <span class="fav-name">${escapeHtml(fav.name)}</span>
+            <span class="fav-eta" id="fav-eta-${role}">…</span>
+            <button type="button" class="fav-fold" title="도착 펼치기" aria-expanded="false">▾</button>
             <button type="button" class="fav-remove" title="즐겨찾기 해제" data-clear="${role}">×</button>
           </div>
           <div class="fav-arrivals" id="fav-arrivals-${role}">도착정보 불러오는 중…</div>`;
         favoritesEl.appendChild(card);
         card.addEventListener('click', (e) => {
           if (e.target.closest('[data-clear]')) return;
-          focusFavorite(role);
+          if (e.target.closest('.fav-name') || e.target.closest('.fav-badge')) {
+            focusFavorite(role);
+            return;
+          }
+          const open = card.classList.toggle('open');
+          const fold = card.querySelector('.fav-fold');
+          if (fold) fold.setAttribute('aria-expanded', open ? 'true' : 'false');
         });
         card.querySelector('[data-clear]').addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1060,6 +1147,20 @@
       });
     }
 
+    function arrivalScore(a) {
+      const sec = Number(a?.etaSec1);
+      if (Number.isFinite(sec) && sec >= 0) return sec;
+      if (String(a?.eta1 || '').includes('곧')) return 0;
+      return 1e9;
+    }
+
+    function shortEtaLabel(a) {
+      const sec = Number(a?.etaSec1);
+      if (String(a?.eta1 || '').includes('곧') || (Number.isFinite(sec) && sec <= 30)) return '곧 도착';
+      if (Number.isFinite(sec) && sec > 0) return `${Math.max(1, Math.round(sec / 60))}분`;
+      return a?.eta1 || '';
+    }
+
     async function refreshFavoriteArrivals() {
       const roles = ['home', 'work'].filter(role => favorites[role]);
       if (!roles.length) {
@@ -1071,14 +1172,23 @@
         const fav = favorites[role];
         try {
           const { arrivals, error } = await fetchStationArrivals(fav.stationId);
-          commuteCache[role] = { arrivals, error };
+          const sorted = [...(arrivals || [])].sort((a, b) => arrivalScore(a) - arrivalScore(b));
+          commuteCache[role] = { arrivals: sorted, error };
+          const etaEl = document.getElementById(`fav-eta-${role}`);
+          const soon = sorted[0];
+          const summary = error
+            ? '오류'
+            : (!soon
+              ? '-'
+              : `${soon.routeName || soon.routeId} ${shortEtaLabel(soon)}`.trim());
+          if (etaEl) etaEl.textContent = summary;
           if (box) {
             if (error) {
               box.textContent = error;
-            } else if (!arrivals.length) {
+            } else if (!sorted.length) {
               box.textContent = '추가한 노선의 도착정보가 없습니다.';
             } else {
-              box.innerHTML = arrivals.map(a => {
+              box.innerHTML = sorted.map(a => {
                 const seat = (a.remainSeat1 != null && a.remainSeat1 >= 0) ? ` · ${a.remainSeat1}석` : '';
                 const next = a.eta2 ? ` / 다음 ${escapeHtml(a.eta2)}` : '';
                 return `<div class="fav-arrival-row"><strong>${escapeHtml(a.routeName || a.routeId)}</strong><span>${escapeHtml(a.eta1 || '정보 없음')}${seat}${next}</span></div>`;
@@ -1747,7 +1857,7 @@
     wireAlertSettings();
     wireCommuteMode();
     refreshFavoriteArrivals().catch(console.warn);
-    syncWatchlist().catch(console.warn);
+    loadWatchlistFromServer().catch(console.warn);
 
     showStationsEl.addEventListener('change', () => {
       saveSettings();
