@@ -5,7 +5,7 @@
   "description": "광역버스 실시간 위치 지도",
   "type": "module",
   "scripts": {
-    "test": "node --test lib/timetable.test.mjs"
+    "test": "node --test lib/*.test.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0"

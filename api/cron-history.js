@@ -3,9 +3,16 @@
 // Blob 사용량 원칙 (Hobby: Advanced Operations 월 2,000건)
 // - 호출 1회당 get 1회(state.json), put 은 "새 도착이 생겼을 때"만 1회.
 // - 예전에는 매 호출마다 approach·history 를 각각 put 해서 하루 수천 건을 썼다(90초 주기 × 2회 put).
-//   지금은 GitHub Action 이 30분 간격으로 호출하고, 저장은 변화가 있을 때만 일어난다.
+//   지금은 GitHub Action 이 평일 아침(05:00~07:00 KST)·저녁(16:00~18:00 KST) 창에서 90초 간격으로 호출하고,
+//   저장은 변화가 있을 때만 일어난다.
+//
+// 정류장별 수집 시간대 (집은 아침, 회사는 저녁)
+// - 05:00~06:59 KST: role 'home' 정류장만 조회·관측
+// - 16:00~17:59 KST: role 'work' 정류장만 조회·관측
+// - 그 외 시각: 크론 지연·수동 호출 등으로 왔더라도 정류장 조회 없이 바로 skipped 로 끝낸다.
 import { fetchStationArrivalsServer } from './_lib/gyeonggi.js';
 import { getState, saveState, recordArrival, storeReady } from './_lib/store.js';
+import { collectionRoleAt, kstHour } from '../lib/collection-window.mjs';
 
 function authorized(req) {
   const secret = (process.env.CRON_SECRET || '').trim();
@@ -98,6 +105,20 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Blob store not configured' });
   }
 
+  // 수집 창(평일 05~07시 / 16~18시 KST) 밖이면 상태를 읽지도, 정류장을 조회하지도 않는다.
+  // (지연된 크론이나 수동 호출이 시간외 데이터를 쌓지 않게 한다. Blob get 도 아낀다.)
+  const windowRole = collectionRoleAt();
+  if (!windowRole) {
+    return res.status(200).json({
+      ok: true,
+      skipped: true,
+      reason: 'outside collection window',
+      kstHour: kstHour(),
+      windows: ['05:00-07:00 KST home', '16:00-18:00 KST work'],
+      at: new Date().toISOString(),
+    });
+  }
+
   try {
     const state = await getState();
     const stations = Array.isArray(state.watchlist?.stations) ? state.watchlist.stations : [];
@@ -112,13 +133,25 @@ export default async function handler(req, res) {
       });
     }
 
+    // 이번 시간대에 해당하는 role 의 정류장만 관측한다.
+    const windowStations = stations.filter((s) => s.role === windowRole);
+    if (!windowStations.length) {
+      return res.status(200).json({
+        ok: true,
+        skipped: true,
+        reason: `no '${windowRole}' station in watchlist`,
+        kstHour: kstHour(),
+        at: new Date().toISOString(),
+      });
+    }
+
     const approach = state.approach || {};
     const history = state.history || {};
     const results = [];
     let changed = false;
     let recorded = 0;
 
-    for (const st of stations) {
+    for (const st of windowStations) {
       const { arrivals, error, rateLimited } = await fetchStationArrivalsServer(
         st.stationId,
         routeIdSet.size ? routeIdSet : null
@@ -140,6 +173,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
+      windowRole,
       stations: results,
       recorded,
       historyKeys: Object.keys(history).length,
