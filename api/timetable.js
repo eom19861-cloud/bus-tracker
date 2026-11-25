@@ -287,9 +287,17 @@ export default async function handler(req, res) {
     station.direction = builtMeta?.nextStationName || selected.destName || builtMeta?.destName || null;
 
     const now = kstParts();
+    const todayIso = `${now.year}-${String(now.month).padStart(2, '0')}-${String(now.day).padStart(2, '0')}`;
     const weekDates = {};
     for (let day = 0; day < 7; day += 1) {
-      weekDates[day] = [1, 2, 3].map((weekAgo) => dateNWeeksAgo(day, weekAgo));
+      // 0주(오늘/이번 주)부터 3주 전까지. 아직 오지 않은 날짜는 넣지 않고 그만큼 더 과거로 채운다.
+      const list = [];
+      for (let weekAgo = 0; weekAgo <= 6 && list.length < 4; weekAgo += 1) {
+        const entry = dateNWeeksAgo(day, weekAgo);
+        if (entry.iso > todayIso) continue;
+        list.push(entry);
+      }
+      weekDates[day] = list;
     }
 
     return res.status(200).json({
@@ -301,7 +309,7 @@ export default async function handler(req, res) {
       weekDates,
       now: { hour: now.hour, minute: now.minute, dow: now.dow },
       source: 'gbis-schedule',
-      note: '경기버스 배차정보로 만든 예상 시간표입니다. 앱을 켜 두면 실제 도착 시각이 주차별 칸에 쌓입니다.',
+      note: '경기버스 배차정보로 만든 예상 시간표입니다. 앱을 켜 두면 실제 도착 시각이 주차별 칸에 쌓이고, 오늘 칸에서 바로 확인할 수 있습니다. 흐린 시각은 예상, 밝은 시각은 실제 기록입니다.',
     });
   } catch (err) {
     return res.status(500).json({ error: String(err) });

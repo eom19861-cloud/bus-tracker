@@ -1,7 +1,8 @@
 (() => {
   const STORAGE_KEY = 'busTracker.pastArrivals.v1';
   const DOW = ['일', '월', '화', '수', '목', '금', '토'];
-  const WEEK_LABEL = ['', '1주 전', '2주 전', '3주 전'];
+  // 열은 '가장 최근 날짜(또는 오늘)'부터 4주치를 보여 준다.
+  const COLUMN_COUNT = 4;
 
   const state = {
     open: false,
@@ -52,6 +53,34 @@
       minute: Number(pick('minute')),
       dow: weekdayMap[pick('weekday')] ?? 0,
     };
+  }
+
+  function isoFromParts(p) {
+    return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+  }
+
+  // 선택한 요일의 가장 최근 날짜(오늘이 그 요일이면 오늘)부터 한 주 간격으로 열을 만든다.
+  //   수요일 화면 → 오늘(11.25.), 1주 전, 2주 전, 3주 전
+  //   월요일 화면 → 이번 주 월요일(11.23.), 1주 전, 2주 전, 3주 전
+  //   금요일 화면 → 지난 금요일(11.20.), 그 전주, ... (아직 오지 않은 날짜는 넣지 않는다)
+  function buildColumns(now = kstParts()) {
+    const baseDaysAgo = (now.dow - state.dow + 7) % 7;
+    const todayMs = Date.parse(`${isoFromParts(now)}T12:00:00+09:00`);
+    const columns = [];
+    for (let k = 0; k < COLUMN_COUNT; k += 1) {
+      const daysAgo = baseDaysAgo + 7 * k;
+      const p = kstParts(new Date(todayMs - daysAgo * 86400000));
+      const weeksAgo = (daysAgo + state.dow - now.dow) / 7;
+      columns.push({
+        daysAgo,
+        weeksAgo,
+        iso: isoFromParts(p),
+        label: `${p.month}.${p.day}.(${DOW[state.dow]})`,
+        tag: daysAgo === 0 ? '오늘' : (weeksAgo === 0 ? '이번 주' : `${weeksAgo}주 전`),
+        isToday: daysAgo === 0,
+      });
+    }
+    return columns;
   }
 
   function loadStore() {
@@ -314,36 +343,58 @@
       #past-tt .tt-grid {
         flex: 1;
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         min-height: 0;
         overflow: auto;
       }
       #past-tt .tt-col {
         border-left: 1px solid rgba(255,255,255,0.06);
+        min-width: 0;
       }
       #past-tt .tt-col:first-child { border-left: 0; }
+      #past-tt .tt-col.today {
+        background: rgba(47, 109, 255, 0.07);
+      }
       #past-tt .tt-col-h {
         text-align: center;
-        padding: 12px 6px 10px;
+        padding: 11px 3px 9px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
       }
-      #past-tt .tt-col-h b { display: block; font-size: 13px; }
+      #past-tt .tt-col-h b {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 600;
+        white-space: nowrap;
+        letter-spacing: -0.01em;
+      }
       #past-tt .tt-col-h i {
         display: block;
-        margin-top: 4px;
+        margin-top: 3px;
         font-style: normal;
         color: #8b93a0;
-        font-size: 11px;
+        font-size: 10.5px;
+        white-space: nowrap;
+        letter-spacing: -0.02em;
       }
+      #past-tt .tt-col-h.today b { color: #6ea8ff; font-weight: 700; }
+      #past-tt .tt-col-h.today i { color: #8fb6ff; }
       #past-tt .tt-time {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        min-height: 46px;
-        font-size: 16px;
+        gap: 4px;
+        min-height: 44px;
+        padding: 0 2px;
+        font-size: 15px;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
         color: #cfd6df;
+      }
+      #past-tt .tt-col.today .tt-time { font-weight: 500; }
+      @media (max-width: 380px) {
+        #past-tt .tt-col-h b { font-size: 11.5px; }
+        #past-tt .tt-col-h i { font-size: 9.5px; }
+        #past-tt .tt-time { font-size: 13.5px; gap: 3px; }
       }
       #past-tt .tt-time.predicted { color: #9aa3af; }
       #past-tt .tt-time.on {
@@ -352,7 +403,7 @@
         font-weight: 700;
       }
       #past-tt .tt-time .mak {
-        width: 18px; height: 18px;
+        width: 16px; height: 16px;
         border-radius: 999px;
         background: #2f6dff;
         color: #fff;
@@ -392,6 +443,7 @@
       const dowBtn = e.target.closest('[data-dow]');
       if (dowBtn) {
         state.dow = Number(dowBtn.getAttribute('data-dow'));
+        state.highlighted = null;
         pickDefaultHour();
         render();
         return;
@@ -469,14 +521,12 @@
 
     const day = p?.byDay?.[state.dow] || { times: [], hours: [] };
     const hours = day.hours || [];
-    const weekDates = p?.weekDates?.[state.dow] || [];
     const scheduleSlice = timesFromHour(day.times || [], state.hour);
 
-    const columns = [1, 2, 3].map((weekAgo) => {
-      const meta = weekDates.find((w) => w.weekAgo === weekAgo) || { label: '', iso: '' };
-      const observed = observedTimes(state.stationId, state.routeId, meta.iso, state.hour);
+    const columns = buildColumns().map((col) => {
+      const observed = observedTimes(state.stationId, state.routeId, col.iso, state.hour);
       const times = observed.length ? observed : scheduleSlice;
-      return { weekAgo, meta, times, observed: observed.length > 0 };
+      return { ...col, times, observed: observed.length > 0 };
     });
 
     const rowCount = Math.max(1, ...columns.map((c) => c.times.length));
@@ -514,8 +564,8 @@
       </div>
       <div class="tt-grid">
         ${columns.map((col) => `
-          <div class="tt-col">
-            <div class="tt-col-h"><b>${WEEK_LABEL[col.weekAgo]}</b><i>${escapeHtml(col.meta.label || '')}</i></div>
+          <div class="tt-col ${col.isToday ? 'today' : ''}">
+            <div class="tt-col-h ${col.isToday ? 'today' : ''}"><b>${escapeHtml(col.tag)}</b><i>${escapeHtml(col.label)}</i></div>
             ${Array.from({ length: rowCount }, (_, i) => {
               const t = col.times[i];
               if (!t) return `<div class="tt-time">&nbsp;</div>`;
