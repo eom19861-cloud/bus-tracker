@@ -3,16 +3,17 @@ name: Collect arrival history
 on:
   schedule:
     # GitHub Actions 의 cron 은 UTC 기준이다. 한국 시간(KST = UTC+9)으로 옮기면:
-    # - 평일 05:30 KST 시작 (UTC 일~목 20:30) → 60분 수집, 06:30 KST 종료
-    # - 평일 16:30 KST 시작 (UTC 월~금 07:30) → 120분 수집, 18:30 KST 종료
-    - cron: "30 20 * * 0-4"
-    - cron: "30 7 * * 1-5"
+    # - 평일 05:00 KST 시작 (UTC 일~목 20:00) → 120분 수집, 07:00 KST 종료  [집 정류장]
+    # - 평일 16:00 KST 시작 (UTC 월~금 07:00) → 120분 수집, 18:00 KST 종료  [회사 정류장]
+    # 어느 정류장을 관측할지는 api/cron-history.js 가 현재 KST 시각으로 고른다(집 05~07시, 회사 16~18시).
+    - cron: "0 20 * * 0-4"
+    - cron: "0 7 * * 1-5"
   workflow_dispatch:
     inputs:
       minutes:
-        description: "수집 시간(분). 비워 두면 60분"
+        description: "수집 시간(분). 비워 두면 120분"
         required: false
-        default: "60"
+        default: "120"
 
 concurrency:
   group: collect-arrivals
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    # 가장 긴 창(오후 120분)에 준비·종료 시간을 더해도 남도록 여유를 둔다.
+    # 가장 긴 창(120분)에 준비·종료 시간을 더해도 남도록 여유를 둔다.
     timeout-minutes: 135
     steps:
       - name: Poll favorites every 90 seconds
@@ -29,16 +30,16 @@ jobs:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          # 수동 실행은 입력값, 예약 실행은 해당 시간대의 창 길이를 쓴다.
-          WINDOW_MINUTES: ${{ (github.event_name == 'workflow_dispatch' && inputs.minutes) || (github.event.schedule == '30 7 * * 1-5' && '120') || '60' }}
+          # 수동 실행은 입력값, 예약 실행은 모두 120분 창을 쓴다.
+          WINDOW_MINUTES: ${{ (github.event_name == 'workflow_dispatch' && inputs.minutes) || '120' }}
         run: |
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
             echo "APP_URL / CRON_SECRET secrets required"
             exit 1
           fi
           POLL_SECONDS=90
-          WINDOW_MINUTES="${WINDOW_MINUTES:-60}"
-          case "$WINDOW_MINUTES" in (*[!0-9]*|'') WINDOW_MINUTES=60 ;; esac
+          WINDOW_MINUTES="${WINDOW_MINUTES:-120}"
+          case "$WINDOW_MINUTES" in (*[!0-9]*|'') WINDOW_MINUTES=120 ;; esac
           echo "collect for ${WINDOW_MINUTES}m every ${POLL_SECONDS}s"
           ARGS=(-H "Authorization: Bearer ${CRON_SECRET}")
           if [ -n "$BYPASS" ]; then
