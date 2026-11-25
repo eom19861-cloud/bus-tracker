@@ -314,7 +314,9 @@
         overflow-x: auto;
         padding: 14px 16px 8px;
         -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
       }
+      #past-tt .tt-hours::-webkit-scrollbar { display: none; }
       #past-tt .tt-hours button {
         flex: none;
         min-width: 58px;
@@ -346,7 +348,9 @@
         grid-template-columns: repeat(4, minmax(0, 1fr));
         min-height: 0;
         overflow: auto;
+        scrollbar-width: none;
       }
+      #past-tt .tt-grid::-webkit-scrollbar { display: none; }
       #past-tt .tt-col {
         border-left: 1px solid rgba(255,255,255,0.06);
         min-width: 0;
